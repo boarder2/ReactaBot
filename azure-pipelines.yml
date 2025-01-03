@@ -14,7 +14,7 @@ steps:
     containerregistrytype: 'Container Registry'
     dockerRegistryEndpoint: 'Docker Hub'
     arguments: '--build-arg BUILD_VERSION=$(Build.BuildNumber)'
-    imageName: 'boarder2/shacknews-discord-auth-bot:$(Build.BuildNumber)-SNAPSHOT'
+    imageName: 'boarder2/reactabot:$(Build.BuildNumber)-SNAPSHOT'
 
 - task: Docker@1
   displayName: Publish
@@ -22,5 +22,5 @@ steps:
     containerregistrytype: 'Container Registry'
     dockerRegistryEndpoint: 'Docker Hub'
     command: 'Push an image'
-    imageName: 'boarder2/shacknews-discord-auth-bot:$(Build.BuildNumber)-SNAPSHOT'
+    imageName: 'boarder2/reactabot:$(Build.BuildNumber)-SNAPSHOT'
 

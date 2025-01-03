@@ -110,36 +110,43 @@ public class DbHelper
 		}
 	}
 
-	public async Task<IEnumerable<(string Url, long AuthorId, int TotalReactions, Dictionary<string, int> Reactions)>> GetTopMessages(DateTimeOffset date, int limit)
+	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(DateTimeOffset date, int limit, ulong? userId = null)
 	{
 		using var connection = GetConnection();
 		await connection.OpenAsync();
 
 		var sql = """
-			SELECT m.url, 
-				   m.author,
-				   m.total_reactions,
-				   GROUP_CONCAT(r.emoji || ':' || r.reaction_count) as reaction_details
+			SELECT m.url, m.author, m.total_reactions, 
+				   GROUP_CONCAT(r.emoji || ':' || r.reaction_count) as reactions
 			FROM messages m
 			LEFT JOIN reactions r ON m.id = r.message_id
-			WHERE date(datetime(m.timestamp)) = date(@Date)
-			GROUP BY m.id, m.url, m.author, m.total_reactions
+			WHERE DATE(m.timestamp) = DATE(@Date)
+		""";
+
+		if (userId.HasValue)
+		{
+			sql += " AND m.author = @UserId";
+		}
+
+		sql += """
+			GROUP BY m.id
 			ORDER BY m.total_reactions DESC
 			LIMIT @Limit
-			""";
+		""";
 
-		var results = await connection.QueryAsync<(string Url, long AuthorId, int TotalReactions, string ReactionDetails)>(
+		var results = await connection.QueryAsync<(string url, ulong authorId, int total, string reactions)>(
 			sql,
-			new { Date = date.Date.ToString("yyyy-MM-dd"), Limit = Math.Min(50, limit) }
+			new { Date = date.Date, Limit = limit, UserId = userId }
 		);
 
 		return results.Select(r => (
-			r.Url,
-			r.AuthorId,
-			r.TotalReactions,
-			r.ReactionDetails.Split(',')
+			r.url,
+			r.authorId,
+			r.total,
+			r.reactions?.Split(',')
+				.Where(x => !string.IsNullOrEmpty(x))
 				.Select(x => x.Split(':'))
-				.ToDictionary(x => x[0], x => int.Parse(x[1]))
-		));
+				.ToDictionary(x => x[0], x => int.Parse(x[1])) ?? new Dictionary<string, int>()
+		)).ToList();
 	}
 }

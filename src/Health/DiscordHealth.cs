@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
-namespace shacknews_discord_auth_bot.Health;
+namespace reactabot.Health;
 
 public class DiscordHealth(ILogger<DiscordHealth> _logger, DiscordService _discordService) : IHealthCheck
 {

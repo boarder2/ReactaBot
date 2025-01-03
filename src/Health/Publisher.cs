@@ -1,7 +1,7 @@
 using System.IO;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
-namespace shacknews_discord_auth_bot.Health;
+namespace reactabot.Health;
 
 public class Publisher : IHealthCheckPublisher
 {

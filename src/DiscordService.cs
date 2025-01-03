@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Dapper;
 
-namespace shacknews_discord_auth_bot;
+namespace reactabot;
 
 public class DiscordService(ILogger<DiscordService> _logger, AppConfiguration _config, DbHelper _db) : IHostedService
 {
@@ -12,7 +12,14 @@ public class DiscordService(ILogger<DiscordService> _logger, AppConfiguration _c
 	{
 		_client = new DiscordSocketClient(new DiscordSocketConfig()
 		{
-			GatewayIntents = GatewayIntents.Guilds | GatewayIntents.GuildIntegrations | GatewayIntents.DirectMessages | GatewayIntents.GuildMessages | GatewayIntents.MessageContent | GatewayIntents.GuildEmojis | GatewayIntents.GuildMessageReactions
+			GatewayIntents =
+				GatewayIntents.DirectMessages |
+				GatewayIntents.GuildEmojis |
+				GatewayIntents.GuildIntegrations |
+				GatewayIntents.GuildMessageReactions |
+				GatewayIntents.GuildMessages |
+				GatewayIntents.Guilds |
+				GatewayIntents.MessageContent
 		}
 		);
 
@@ -29,19 +36,29 @@ public class DiscordService(ILogger<DiscordService> _logger, AppConfiguration _c
 			await UpdateMessageReactions(msg);
 		};
 
-		_client.MessageReceived += async (message) =>
-		 {
-			 if (message.Content.StartsWith("!top"))
-			 {
-				 await HandleTopCommand(message);
-			 }
-		 };
-
-		_client.Ready += () =>
+		_client.Ready += async () =>
 		{
 			_logger.LogInformation($"Logged in as {_client.CurrentUser.Username}");
-			return Task.CompletedTask;
+			
+			// Register the slash command
+			var guildCommand = new SlashCommandBuilder()
+				.WithName("top")
+				.WithDescription("Get top reacted messages")
+				.AddOption("date", ApplicationCommandOptionType.String, "Date in YYYY-MM-DD format - Defaults to today", isRequired: false)
+				.AddOption("user", ApplicationCommandOptionType.User, "Filter by user", isRequired: false)
+				.AddOption("limit", ApplicationCommandOptionType.Integer, "Number of messages to show (1-50) - Defaults to 10", isRequired: false);
+
+			try
+			{
+				await _client.CreateGlobalApplicationCommandAsync(guildCommand.Build());
+			}
+			catch (Exception ex)
+			{
+				_logger.LogError(ex, "Error registering slash command");
+			}
 		};
+
+		_client.SlashCommandExecuted += HandleSlashCommand;
 
 		LogContext.Push(
 			 new PropertyEnricher("BotVersion", System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString())
@@ -161,51 +178,67 @@ public class DiscordService(ILogger<DiscordService> _logger, AppConfiguration _c
 		return "(Message content unavailable)";
 	}
 
-	private async Task HandleTopCommand(SocketMessage message)
+	private async Task HandleSlashCommand(SocketSlashCommand command)
 	{
-		var args = message.Content.Split(' ');
-		var date = DateTimeOffset.UtcNow;
-		var limit = 10;
-
-		if (args.Length > 1)
+		if (command.CommandName == "top")
 		{
-			if (args.Length != 3)
+			await command.DeferAsync(); // Defer the response since it might take some time
+
+			var date = DateTimeOffset.UtcNow;
+			var limit = 10;
+			ulong? userId = null;
+
+			var dateOption = command.Data.Options.FirstOrDefault(x => x.Name == "date");
+			var limitOption = command.Data.Options.FirstOrDefault(x => x.Name == "limit");
+			var userOption = command.Data.Options.FirstOrDefault(x => x.Name == "user");
+
+			if (dateOption != null && !DateTimeOffset.TryParse((string)dateOption.Value, out date))
 			{
-				await message.Channel.SendMessageAsync("Usage: `!top [Date Number]` (e.g., `!top 2024-01-25 10`)\nOr just `!top` for today's top 10");
+				await command.ModifyOriginalResponseAsync(msg => 
+					msg.Content = "Invalid date format. Please use YYYY-MM-DD");
 				return;
 			}
 
-			if (!DateTimeOffset.TryParse(args[1], out date))
+			if (limitOption != null)
 			{
-				await message.Channel.SendMessageAsync("Invalid date format. Please use YYYY-MM-DD");
+				var longLimit = (long)limitOption.Value;
+				limit = (int)Math.Clamp(longLimit, 1, 50);
+				if (longLimit != limit)
+				{
+					await command.ModifyOriginalResponseAsync(msg => 
+						msg.Content = "Number must be between 1 and 50");
+					return;
+				}
+			}
+
+			if (userOption != null)
+			{
+				userId = ((IUser)userOption.Value).Id;
+			}
+
+			var topMessages = await _db.GetTopMessages(date, limit, userId);
+			if (!topMessages.Any())
+			{
+				await command.ModifyOriginalResponseAsync(msg => 
+					msg.Content = $"No messages found for {date:MMMM d, yyyy}");
 				return;
 			}
 
-			if (!int.TryParse(args[2], out limit) || limit < 1 || limit > 50)
+			var response = new StringBuilder($"Top {limit} messages for {date:MMMM d, yyyy}:\n\n");
+
+			var rank = 1;
+			foreach (var (url, authorId, total, reactions) in topMessages)
 			{
-				await message.Channel.SendMessageAsync("Number must be between 1 and 50");
-				return;
+				response.AppendLine($"#{rank}. <@{authorId}> - {url}");
+				var preview = await GetMessagePreview(url);
+				response.AppendLine($"```\n{preview}\n```");
+				response.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}  "))} [{total}] total reactions");
+				response.AppendLine();
+				response.AppendLine();
+				rank++;
 			}
+
+			await command.ModifyOriginalResponseAsync(msg => msg.Content = response.ToString());
 		}
-
-		var topMessages = await _db.GetTopMessages(date, limit);
-		if (!topMessages.Any())
-		{
-			await message.Channel.SendMessageAsync($"No messages found for {date:MMMM d, yyyy}");
-			return;
-		}
-
-		var response = new StringBuilder($"Top {limit} messages for {date:MMMM d, yyyy}:\n\n");
-
-		foreach (var (url, authorId, total, reactions) in topMessages)
-		{
-			response.AppendLine($"<@{authorId}> - {url}");
-			var preview = await GetMessagePreview(url);
-			response.AppendLine($"> {preview}");
-			response.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}  "))}");
-			response.AppendLine();
-		}
-
-		await message.Channel.SendMessageAsync(response.ToString());
 	}
 }

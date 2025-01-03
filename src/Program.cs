@@ -2,8 +2,8 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Serilog;
 using Serilog.Formatting.Compact;
-using shacknews_discord_auth_bot;
-using shacknews_discord_auth_bot.Health;
+using reactabot;
+using reactabot.Health;
 
 Log.Logger = new LoggerConfiguration()
 					.Enrich.FromLogContext()

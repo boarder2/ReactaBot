@@ -1,6 +1,6 @@
 using System.Net;
 
-namespace shacknews_discord_auth_bot;
+namespace reactabot;
 
 public static class HttpClientExtensions
 {

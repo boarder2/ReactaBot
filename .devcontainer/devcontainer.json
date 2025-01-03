@@ -22,16 +22,15 @@
 			"extensions": [
 				"ms-dotnettools.csharp",
 				"mutantdino.resourcemonitor",
-				"alexcvzz.vscode-sqlite"
+				"alexcvzz.vscode-sqlite",
+				"ms-dotnettools.csdevkit"
 			]
 		}
 	},
 	
 	"shutdownAction":  "stopContainer",
 	"remoteEnv": {
-		"DISCORD_TOKEN": "${localEnv:SAB_DISCORD_TOKEN}",
-		"MESSAGE_USERNAME": "${localEnv:SAB_MESSAGE_USERNAME}",
-		"MESSAGE_PASSWORD": "${localEnv:SAB_MESSAGE_PASSWORD}"
+		"DISCORD_TOKEN": "${localEnv:RAB_DISCORD_TOKEN}"
 	},
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [5000, 5001],
@@ -60,7 +59,7 @@
 	//      "mounts": [ "source=${env:HOME}${env:USERPROFILE}/.aspnet/https,target=/home/vscode/.aspnet/https,type=bind" ],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install sqlite3 -y"
+	"postCreateCommand": "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install sqlite3 -y && sudo dotnet workload update"
 
 	// Comment out connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	//"remoteUser": "vscode"
