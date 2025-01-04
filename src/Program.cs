@@ -36,6 +36,7 @@ builder.Services.AddSingleton<HttpClient>(provider =>
 // builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<AppConfiguration>();
 builder.Services.AddSingleton<DbHelper>();
+builder.Services.AddScoped<ReactionsService>();
 builder.Services.AddHealthChecks()
 	.AddCheck<DiscordHealth>("Discord Health");
 builder.Services.AddSingleton<IHealthCheckPublisher, Publisher>();

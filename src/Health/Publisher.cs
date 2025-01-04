@@ -1,4 +1,3 @@
-using System.IO;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace reactabot.Health;
