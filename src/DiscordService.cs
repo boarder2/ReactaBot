@@ -35,22 +35,38 @@ public class DiscordService(ILogger<DiscordService> _logger, AppConfiguration _c
 		_client.Ready += async () =>
 		{
 			_logger.LogInformation($"Logged in as {_client.CurrentUser.Username}");
-			
-			// Register the slash command
-			var guildCommand = new SlashCommandBuilder()
-				.WithName("top")
-				.WithDescription("Get top reacted messages")
-				.AddOption("date", ApplicationCommandOptionType.String, "Date in YYYY-MM-DD format - Defaults to today", isRequired: false)
-				.AddOption("user", ApplicationCommandOptionType.User, "Filter by user", isRequired: false)
-				.AddOption("limit", ApplicationCommandOptionType.Integer, "Number of messages to show (1-50) - Defaults to 10", isRequired: false);
+
+			// Register the slash commands
+			var commands = new SlashCommandBuilder[]
+			{
+				new SlashCommandBuilder()
+					.WithName("top")
+					.WithDescription("Get top reacted messages")
+					.AddOption("date", ApplicationCommandOptionType.String, "Date in YYYY-MM-DD format - Defaults to today", isRequired: false, isAutocomplete:true)
+					.AddOption("channel", ApplicationCommandOptionType.Channel, "Filter by channel", isRequired: false, isAutocomplete: true)
+					.AddOption("user", ApplicationCommandOptionType.User, "Filter by user", isRequired: false, isAutocomplete: true)
+					.AddOption("limit", ApplicationCommandOptionType.Integer, "Number of messages to show (1-50) - Defaults to 10", isRequired: false),
+				new SlashCommandBuilder()
+					.WithName("optout")
+					.WithDescription("Opt out of having reactions to your reactions tracked by the bot"),
+				new SlashCommandBuilder()
+					.WithName("optin")
+					.WithDescription("Opt back in to having reactions to your messages tracked by the bot"),
+				new SlashCommandBuilder()
+					.WithName("optstatus")
+					.WithDescription("Check if your reactions to your messages are being tracked by the bot")
+			};
 
 			try
 			{
-				await _client.CreateGlobalApplicationCommandAsync(guildCommand.Build());
+				foreach (var command in commands)
+				{
+					await _client.CreateGlobalApplicationCommandAsync(command.Build());
+				}
 			}
 			catch (Exception ex)
 			{
-				_logger.LogError(ex, "Error registering slash command");
+				_logger.LogError(ex, "Error registering slash commands");
 			}
 		};
 
@@ -86,10 +102,27 @@ public class DiscordService(ILogger<DiscordService> _logger, AppConfiguration _c
 
 	private async Task HandleSlashCommand(SocketSlashCommand command)
 	{
-		if (command.CommandName == "top")
+		switch (command.CommandName)
 		{
-			await command.DeferAsync(); // Defer the response since it might take some time
-			await _reactionService.PrintTopReactions(_client, command);
+			case "top":
+				await command.DeferAsync();
+				await _reactionService.PrintTopReactions(_client, command);
+				break;
+			case "optout":
+				await _db.OptOutUser(command.User.Id);
+				await command.RespondAsync("You have been opted out. Reactions to your messages will no longer be tracked. Any existing tracked messages have been removed.", ephemeral: true);
+				break;
+			case "optin":
+				await _db.OptInUser(command.User.Id);
+				await command.RespondAsync("You have been opted back in. Reactions to your messages will now be tracked.", ephemeral: true);
+				break;
+			case "optstatus":
+				bool isOptedOut = await _db.IsUserOptedOut(command.User.Id);
+				string status = isOptedOut 
+					? "You are currently opted out. Reactions to your messages are not being tracked." 
+					: "You are currently opted in. Reactions to your messages are being tracked.";
+				await command.RespondAsync(status, ephemeral: true);
+				break;
 		}
 	}
 }

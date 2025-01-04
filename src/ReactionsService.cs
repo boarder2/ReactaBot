@@ -5,6 +5,12 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 {
 	public async Task UpdateMessageReactions(IMessage msg)
 	{
+		if (await _db.IsUserOptedOut(msg.Author.Id))
+		{
+			_logger.LogInformation("Skipping message {MessageId} due to user opt-out", msg.Id);
+			return;
+		}
+
 		using var connection = _db.GetConnection();
 		await connection.OpenAsync();
 		using var transaction = connection.BeginTransaction();
@@ -27,15 +33,16 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 
 			// First ensure the message exists in DB
 			var messageSql = """
-			INSERT OR REPLACE INTO messages(id, timestamp, author, url, total_reactions) 
-			VALUES(@Id, @Timestamp, @Author, @Url, @TotalReactions);
+			INSERT OR REPLACE INTO messages(id, guild_id, timestamp, author, url, total_reactions) 
+			VALUES(@Id, @GuildId, @Timestamp, @Author, @Url, @TotalReactions);
 			""";
 			await connection.ExecuteAsync(messageSql, new
 			{
+				msg.Id,
+				(msg.Channel as IGuildChannel)?.GuildId,
 				msg.Timestamp,
 				Author = msg.Author.Id,
 				Url = msg.GetJumpUrl(),
-				msg.Id,
 				TotalReactions = totalReactions
 			}, transaction);
 
@@ -69,61 +76,83 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 	{
 		try
 		{
-		var date = DateTimeOffset.UtcNow;
-		var limit = 10;
-		ulong? userId = null;
+			var date = DateTimeOffset.UtcNow;
+			var limit = 10;
+			ulong? userId = null;
+			ulong guildId;
+			ulong? channelId = null;
 
-		var dateOption = command.Data.Options.FirstOrDefault(x => x.Name == "date");
-		var limitOption = command.Data.Options.FirstOrDefault(x => x.Name == "limit");
-		var userOption = command.Data.Options.FirstOrDefault(x => x.Name == "user");
+			// Parse standard options
+			var dateOption = command.Data.Options.FirstOrDefault(x => x.Name == "date");
+			var limitOption = command.Data.Options.FirstOrDefault(x => x.Name == "limit");
+			var userOption = command.Data.Options.FirstOrDefault(x => x.Name == "user");
+			var channelOption = command.Data.Options.FirstOrDefault(x => x.Name == "channel");
 
-		if (dateOption != null && !DateTimeOffset.TryParse((string)dateOption.Value, out date))
-		{
-			await command.ModifyOriginalResponseAsync(msg =>
-				msg.Content = "Invalid date format. Please use YYYY-MM-DD");
-			return;
-		}
+			// Handle DM vs Guild context
+			if (command.GuildId.HasValue)
+			{
+				guildId = command.GuildId.Value;
+			}
+			else // DM context
+			{
+				if (channelOption == null)
+				{
+					await command.ModifyOriginalResponseAsync(msg =>
+						msg.Content = "When using this command in DMs, you must specify a channel!");
+					return;
+				}
 
-		if (limitOption != null)
-		{
-			var longLimit = (long)limitOption.Value;
-			limit = (int)Math.Clamp(longLimit, 1, 50);
-			if (longLimit != limit)
+				channelId = ((ITextChannel)channelOption.Value).Id;
+				guildId = ((ITextChannel)channelOption.Value).GuildId;
+			}
+
+			if (dateOption != null && !DateTimeOffset.TryParse((string)dateOption.Value, out date))
 			{
 				await command.ModifyOriginalResponseAsync(msg =>
-					msg.Content = "Number must be between 1 and 50");
+					msg.Content = "Invalid date format. Please use YYYY-MM-DD");
 				return;
 			}
-		}
 
-		if (userOption != null)
-		{
-			userId = ((IUser)userOption.Value).Id;
-		}
+			if (limitOption != null)
+			{
+				var longLimit = (long)limitOption.Value;
+				limit = (int)Math.Clamp(longLimit, 1, 50);
+				if (longLimit != limit)
+				{
+					await command.ModifyOriginalResponseAsync(msg =>
+						msg.Content = "Number must be between 1 and 50");
+					return;
+				}
+			}
 
-		var topMessages = await _db.GetTopMessages(date, limit, userId);
-		if (!topMessages.Any())
-		{
-			await command.ModifyOriginalResponseAsync(msg =>
-				msg.Content = $"No messages found for {date:MMMM d, yyyy}");
-			return;
-		}
+			if (userOption != null)
+			{
+				userId = ((IUser)userOption.Value).Id;
+			}
 
-		var response = new StringBuilder($"Top {limit} messages for {date:MMMM d, yyyy}:\n\n");
+			var topMessages = await _db.GetTopMessages(date, limit, guildId, channelId, userId);
+			if (!topMessages.Any())
+			{
+				await command.ModifyOriginalResponseAsync(msg =>
+					msg.Content = $"No messages found for {date:MMMM d, yyyy}");
+				return;
+			}
 
-		var rank = 1;
-		foreach (var (url, authorId, total, reactions) in topMessages)
-		{
-			response.AppendLine($"#{rank}. <@{authorId}> - {url}");
-			var preview = await client.GetMessagePreview(url);
-			response.AppendLine($"```\n{preview}\n```");
-			response.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}  "))} [{total}] total reactions");
-			response.AppendLine();
-			response.AppendLine();
-			rank++;
-		}
+			var response = new StringBuilder($"Top {limit} messages for {date:MMMM d, yyyy}:\n\n");
 
-		await command.ModifyOriginalResponseAsync(msg => msg.Content = response.ToString());
+			var rank = 1;
+			foreach (var (url, authorId, total, reactions) in topMessages)
+			{
+				response.AppendLine($"#{rank}. <@{authorId}> - {url}");
+				var preview = await client.GetMessagePreview(url);
+				response.AppendLine($"```\n{preview}\n```");
+				response.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}  "))} [{total}] total reactions");
+				response.AppendLine();
+				response.AppendLine();
+				rank++;
+			}
+
+			await command.ModifyOriginalResponseAsync(msg => msg.Content = response.ToString());
 		}
 		catch (Exception ex)
 		{

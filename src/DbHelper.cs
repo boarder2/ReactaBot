@@ -62,13 +62,14 @@ public class DbHelper
 						CREATE TABLE messages
 						(
 							id INTEGER PRIMARY KEY,
+							guild_id INTEGER,
 							author INTEGER NOT NULL,
 							url VARCHAR(300) NOT NULL,
 							timestamp INTEGER NOT NULL DEFAULT(datetime('now')),
 							total_reactions INTEGER NOT NULL DEFAULT 0
 						);
-						CREATE INDEX messages_author ON messages(author);
-						CREATE INDEX messages_timestamp_total_reactions ON messages(timestamp, total_reactions);
+						CREATE INDEX messages_guild_id_author ON messages(guild_id, author);
+						CREATE INDEX messages_guild_id_timestamp_total_reactions ON messages(guild_id, timestamp, total_reactions);
 
 						CREATE TABLE reactions
 						(
@@ -79,6 +80,11 @@ public class DbHelper
 							FOREIGN KEY(message_id) REFERENCES messages(id)
 						);
 
+						CREATE TABLE IF NOT EXISTS opted_out_users (
+							user_id BIGINT PRIMARY KEY,
+							opted_out_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+						);
+						
 						PRAGMA user_version=" + CurrentVersion + ";", transaction: tx);
 		tx.Commit();
 	}
@@ -110,7 +116,8 @@ public class DbHelper
 		}
 	}
 
-	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(DateTimeOffset date, int limit, ulong? userId = null)
+	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(
+		DateTimeOffset date, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
 	{
 		using var connection = GetConnection();
 		await connection.OpenAsync();
@@ -121,7 +128,13 @@ public class DbHelper
 			FROM messages m
 			LEFT JOIN reactions r ON m.id = r.message_id
 			WHERE DATE(m.timestamp) = DATE(@Date)
+			AND m.guild_id = @GuildId
 		""";
+		
+		if (channelId.HasValue)
+		{
+			sql += " AND m.channel_id = @ChannelId";
+		}
 
 		if (userId.HasValue)
 		{
@@ -136,7 +149,7 @@ public class DbHelper
 
 		var results = await connection.QueryAsync<(string url, ulong authorId, int total, string reactions)>(
 			sql,
-			new { Date = date.Date, Limit = limit, UserId = userId }
+			new { Date = date.Date, Limit = limit, GuildId = guildId, UserId = userId }
 		);
 
 		return results.Select(r => (
@@ -148,5 +161,61 @@ public class DbHelper
 				.Select(x => x.Split(':'))
 				.ToDictionary(x => x[0], x => int.Parse(x[1])) ?? new Dictionary<string, int>()
 		)).ToList();
+	}
+
+	public async Task OptOutUser(ulong userId)
+	{
+		using var conn = GetConnection();
+		await conn.OpenAsync();
+		using var transaction = conn.BeginTransaction();
+
+		try
+		{
+			// Delete existing reactions for user's messages
+			await conn.ExecuteAsync(@"
+				DELETE FROM reactions 
+				WHERE message_id IN (
+					SELECT id FROM messages WHERE author = @UserId
+				)", new { UserId = userId }, transaction);
+
+			// Delete user's messages
+			await conn.ExecuteAsync(
+				"DELETE FROM messages WHERE author = @UserId", 
+				new { UserId = userId }, 
+				transaction);
+
+			// Add user to opted out table
+			await conn.ExecuteAsync(@"
+				INSERT INTO opted_out_users (user_id)
+				VALUES (@UserId)
+				ON CONFLICT (user_id) DO NOTHING;",
+				new { UserId = userId }, 
+				transaction);
+
+			transaction.Commit();
+			_logger.LogInformation("User {UserId} opted out and their data was deleted", userId);
+		}
+		catch (Exception ex)
+		{
+			transaction.Rollback();
+			_logger.LogError(ex, "Failed to opt out user {UserId}", userId);
+			throw;
+		}
+	}
+
+	public async Task<bool> IsUserOptedOut(ulong userId)
+	{
+		using var conn = GetConnection();
+		return await conn.QuerySingleOrDefaultAsync<bool>(
+			"SELECT EXISTS(SELECT 1 FROM opted_out_users WHERE user_id = @UserId)",
+			new { UserId = userId });
+	}
+
+	public async Task OptInUser(ulong userId)
+	{
+		using var conn = GetConnection();
+		await conn.ExecuteAsync(
+			"DELETE FROM opted_out_users WHERE user_id = @UserId",
+			new { UserId = userId });
 	}
 }
