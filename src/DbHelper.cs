@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 public class DbHelper
 {
-	private readonly long CurrentVersion = 1;  // Increment version for new migration
+	private readonly long CurrentVersion = 0;  // Increment version for new migration
 	private bool _initialized;
 	private readonly string DbFile;
 	private readonly ILogger<DbHelper> _logger;
@@ -66,6 +66,7 @@ public class DbHelper
 						(
 							id INTEGER PRIMARY KEY,
 							guild_id INTEGER,
+							channel_id INTEGER,
 							author INTEGER NOT NULL,
 							url VARCHAR(300) NOT NULL,
 							timestamp INTEGER NOT NULL DEFAULT(datetime('now')),
@@ -73,6 +74,7 @@ public class DbHelper
 						);
 						CREATE INDEX messages_guild_id_author ON messages(guild_id, author);
 						CREATE INDEX messages_guild_id_timestamp_total_reactions ON messages(guild_id, timestamp, total_reactions);
+						CREATE INDEX messages_guild_id_channel_id ON messages(guild_id, channel_id);
 
 						CREATE TABLE reactions
 						(
@@ -140,7 +142,7 @@ public class DbHelper
 		using var conn = GetConnection();
 		await conn.ExecuteAsync(@"
 				INSERT INTO scheduled_jobs (id, cron_expression, interval, channel_id, guild_id, count, next_run, created_at)
-				VALUES (@Id, @CronExpression, @Interval, @ChannelId, @GuildId, @Count, @NextRun, @CreatedAt)",
+				VALUES (LOWER(@Id), @CronExpression, @Interval, @ChannelId, @GuildId, @Count, @NextRun, @CreatedAt)",
 			job);
 		return job.Id;
 	}
@@ -167,7 +169,7 @@ public class DbHelper
 		using var conn = GetConnection();
 		await conn.ExecuteAsync(
 			"UPDATE scheduled_jobs SET next_run = @NextRun WHERE id = @JobId",
-			new { JobId = jobId.ToString(), NextRun = nextRun });
+			new { JobId = jobId.ToString().ToLowerInvariant(), NextRun = nextRun });
 	}
 
 	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(
@@ -316,8 +318,8 @@ public class DbHelper
 					 next_run as NextRun,
 					 created_at as CreatedAt
 				FROM scheduled_jobs 
-				WHERE UPPER(id) = UPPER(@Id)",
-			new { Id = guid.ToString() });
+				WHERE id = @Id",
+			new { Id = guid.ToString().ToLowerInvariant() });
 	}
 
 	public async Task DeleteSchedule(string id)
@@ -327,8 +329,45 @@ public class DbHelper
 
 		using var conn = GetConnection();
 		await conn.ExecuteAsync(
-			"DELETE FROM scheduled_jobs WHERE UPPER(id) = UPPER(@Id)",
-			new { Id = guid.ToString() });
+			"DELETE FROM scheduled_jobs WHERE id = @Id",
+			new { Id = guid.ToString().ToLowerInvariant() });
+	}
+
+	public async Task<int> DeleteMessages(ulong guildId, ulong? channelId = null, ulong? userId = null)
+	{
+		using var conn = GetConnection();
+		await conn.OpenAsync();
+		using var transaction = conn.BeginTransaction();
+
+		try
+		{
+			var whereClause = new List<string> { "guild_id = @GuildId" };
+			if (channelId.HasValue)
+			{
+				whereClause.Add("channel_id = @ChannelId");
+			}
+			if (userId.HasValue)
+			{
+				whereClause.Add("author = @UserId");
+			}
+
+			var sql = $@"
+				DELETE FROM reactions 
+				WHERE message_id IN (
+					SELECT id FROM messages WHERE {string.Join(" AND ", whereClause)}
+				);
+				DELETE FROM messages WHERE {string.Join(" AND ", whereClause)};";
+
+			var result = await conn.ExecuteAsync(sql, new { GuildId = guildId, ChannelId = channelId, UserId = userId }, transaction);
+			transaction.Commit();
+			return result;
+		}
+		catch (Exception ex)
+		{
+			transaction.Rollback();
+			_logger.LogError(ex, "Failed to delete messages for guild {GuildId}, channel {ChannelId}, user {UserId}", guildId, channelId, userId);
+			throw;
+		}
 	}
 
 	// Add this class inside DbHelper
@@ -341,7 +380,7 @@ public class DbHelper
 
 		public override void SetValue(IDbDataParameter parameter, Guid value)
 		{
-			parameter.Value = value.ToString();
+			parameter.Value = value.ToString().ToLowerInvariant();
 		}
 	}
 }

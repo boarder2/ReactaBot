@@ -30,6 +30,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 			{
 				new SlashCommandBuilder()
 					.WithName("top")
+					.WithContextTypes(InteractionContextType.Guild)
 					.WithDescription("Get top reacted messages")
 					.AddOption("date", ApplicationCommandOptionType.String, "Date in YYYY-MM-DD format - Defaults to today", isRequired: false, isAutocomplete:true)
 					.AddOption("channel", ApplicationCommandOptionType.Channel, "Filter by channel", isRequired: false, isAutocomplete: true)
@@ -46,6 +47,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 					.WithDescription("Check if your reactions to your messages are being tracked by the bot"),
 				new SlashCommandBuilder()
 					.WithName("schedule")
+					.WithContextTypes(InteractionContextType.Guild)
 					.WithDescription("Schedule recurring top messages report")
 					.AddOption("cron", ApplicationCommandOptionType.String, "Cron expression for scheduling (e.g. '0 */4 * * *')", isRequired: true)
 					.AddOption("interval", ApplicationCommandOptionType.String, "Time interval to analyze (1h,4h,8h,12h,24h,2d,3d,5d,7d)", isRequired: true)
@@ -53,11 +55,19 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 					.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-50)", isRequired: true),
 				new SlashCommandBuilder()
 					.WithName("getschedules")
+					.WithContextTypes(InteractionContextType.Guild)
 					.WithDescription("Get all scheduled reports for this server"),
 				new SlashCommandBuilder()
 					.WithName("removeschedule")
+					.WithContextTypes(InteractionContextType.Guild)
 					.WithDescription("Remove a scheduled report")
-					.AddOption("id", ApplicationCommandOptionType.String, "The ID of the schedule to remove", isRequired: true)
+					.AddOption("id", ApplicationCommandOptionType.String, "The ID of the schedule to remove", isRequired: true),
+				new SlashCommandBuilder()
+					.WithName("delete")
+					.WithContextTypes(InteractionContextType.Guild)
+					.WithDescription("Delete stored reactions")
+					.AddOption("channel", ApplicationCommandOptionType.Channel, "Delete reactions from this channel", isRequired: false)
+					.AddOption("user", ApplicationCommandOptionType.User, "Delete reactions from this user", isRequired: false)
 			};
 
 			try
@@ -135,6 +145,9 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 			case "removeschedule":
 				await HandleRemoveScheduleCommand(command);
 				break;
+			case "delete":
+				await HandleDeleteCommand(command);
+				break;
 		}
 	}
 
@@ -189,8 +202,8 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 
 		await _db.CreateScheduledJob(job);
 		await command.RespondAsync(
-			$"Scheduled job created. Will post top {count} messages for the last {interval} to {channel.Mention}\n" +
-			$"Schedule: {cronExpr}\nNext run: {nextRun.Value:yyyy-MM-dd HH:mm:ss} UTC", 
+			$"Scheduled job created. Will post top {count} messages for the last `{interval}` to {channel.Mention}\n" +
+			$"Schedule: `{cronExpr}`\nNext run: {nextRun.Value:yyyy-MM-dd HH:mm:ss} UTC", 
 			ephemeral: true);
 	}
 
@@ -236,14 +249,6 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 			return;
 		}
 
-		// Check if user has permission to delete this schedule
-		var guildUser = command.User as SocketGuildUser;
-		if (!guildUser.GuildPermissions.ManageMessages && !guildUser.GuildPermissions.Administrator)
-		{
-			await command.RespondAsync("You need the Manage Messages permission to remove schedules.", ephemeral: true);
-			return;
-		}
-
 		if (schedule.GuildId != command.GuildId.Value)
 		{
 			await command.RespondAsync("That schedule belongs to a different server.", ephemeral: true);
@@ -252,6 +257,34 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 
 		await _db.DeleteSchedule(id);
 		await command.RespondAsync($"Schedule {id} has been removed.", ephemeral: true);
+	}
+
+	private async Task HandleDeleteCommand(SocketSlashCommand command)
+	{
+		if (!command.GuildId.HasValue)
+		{
+			await command.RespondAsync("This command can only be used in servers!", ephemeral: true);
+			return;
+		}
+
+		var channel = command.Data.Options.FirstOrDefault(x => x.Name == "channel")?.Value as ITextChannel;
+		var user = command.Data.Options.FirstOrDefault(x => x.Name == "user")?.Value as SocketUser;
+
+		if (channel == null && user == null)
+		{
+			await command.RespondAsync("You must specify at least one of: channel or user", ephemeral: true);
+			return;
+		}
+
+		await command.DeferAsync(ephemeral: true);
+		var count = await _db.DeleteMessages(command.GuildId.Value, channel?.Id, user?.Id);
+		
+		var response = new StringBuilder("Deleted reactions for:");
+		if (channel != null) response.AppendLine($"\nChannel: {channel.Mention}");
+		if (user != null) response.AppendLine($"\nUser: {user.Mention}");
+		response.AppendLine($"\nTotal messages and reactions deleted: {count}");
+
+		await command.FollowupAsync(response.ToString(), ephemeral: true);
 	}
 
 	private string FormatSchedules(List<ScheduledJob> schedules)

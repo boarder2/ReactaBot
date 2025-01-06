@@ -18,9 +18,9 @@ builder.Services.AddSingleton(x =>
 	return new DiscordSocketClient(new DiscordSocketConfig()
 	{
 		GatewayIntents =
-			GatewayIntents.DirectMessages |
-			GatewayIntents.GuildEmojis |
-			GatewayIntents.GuildIntegrations |
+			// GatewayIntents.DirectMessages |
+			// GatewayIntents.GuildEmojis |
+			// GatewayIntents.GuildIntegrations |
 			GatewayIntents.GuildMessageReactions |
 			GatewayIntents.GuildMessages |
 			GatewayIntents.Guilds |

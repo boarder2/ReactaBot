@@ -68,10 +68,19 @@ public class SchedulerService : IHostedService
 			var jobs = await _db.GetDueJobs();
 			foreach (var job in jobs)
 			{
+				using var _ = _logger.BeginScope(new Dictionary<string, object>
+				{
+					{ "JobId", job.Id },
+					{ "GuildId", job.GuildId },
+					{ "ChannelId", job.ChannelId },
+					{ "CronExpression", job.CronExpression },
+					{ "Interval", job.Interval },
+					{ "Count", job.Count }
+				});
+
+				await ExecuteJob(job);
 				try
 				{
-					await ExecuteJob(job);
-
 					// Calculate and set next run time
 					var expression = CronExpression.Parse(job.CronExpression);
 					var nextRun = expression.GetNextOccurrence(DateTime.UtcNow);
@@ -98,39 +107,31 @@ public class SchedulerService : IHostedService
 
 	private async Task ExecuteJob(ScheduledJob job)
 	{
-		try
+		var channel = _client.GetChannel(job.ChannelId) as ITextChannel;
+		if (channel == null)
 		{
-			var channel = _client.GetChannel(job.ChannelId) as ITextChannel;
-			if (channel == null)
-			{
-				_logger.LogError("Could not find channel {ChannelId} for job {JobId}", job.ChannelId, job.Id);
-				return;
-			}
-
-			var endDate = DateTimeOffset.UtcNow;
-			var startDate = endDate.Subtract(ParseInterval(job.Interval));
-			
-			var messages = await _db.GetTopMessages(
-				startDate, 
-				endDate,
-				job.Count, 
-				job.GuildId);
-
-			if (messages.Any())
-			{
-				var header = $"Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
-				var response = await _reactionsService.FormatTopMessages(_client, messages, header);
-				await channel.SendMessageAsync(response);
-				_logger.LogInformation("Successfully executed job {JobId}", job.Id);
-			}
-			else
-			{
-				_logger.LogInformation("No messages found for job {JobId}", job.Id);
-			}
+			throw new Exception($"Could not find channel");
 		}
-		catch (Exception ex)
+
+		var endDate = DateTimeOffset.UtcNow;
+		var startDate = endDate.Subtract(ParseInterval(job.Interval));
+
+		var messages = await _db.GetTopMessages(
+			startDate,
+			endDate,
+			job.Count,
+			job.GuildId);
+
+		if (messages.Any())
 		{
-			_logger.LogError(ex, "Error executing scheduled job {JobId}", job.Id);
+			var header = $"Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
+			var response = await _reactionsService.FormatTopMessages(_client, messages, header);
+			await channel.SendMessageAsync(response);
+			_logger.LogInformation("Successfully executed job");
+		}
+		else
+		{
+			_logger.LogInformation("No messages found for job");
 		}
 	}
 

@@ -33,13 +33,14 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 
 			// First ensure the message exists in DB
 			var messageSql = """
-			INSERT OR REPLACE INTO messages(id, guild_id, timestamp, author, url, total_reactions) 
-			VALUES(@Id, @GuildId, @Timestamp, @Author, @Url, @TotalReactions);
+			INSERT OR REPLACE INTO messages(id, guild_id, channel_id, timestamp, author, url, total_reactions) 
+			VALUES(@Id, @GuildId, @ChannelId, @Timestamp, @Author, @Url, @TotalReactions);
 			""";
 			await connection.ExecuteAsync(messageSql, new
 			{
 				msg.Id,
 				(msg.Channel as IGuildChannel)?.GuildId,
+				ChannelId = msg.Channel.Id,
 				msg.Timestamp,
 				Author = msg.Author.Id,
 				Url = msg.GetJumpUrl(),
