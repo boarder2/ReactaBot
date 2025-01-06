@@ -138,25 +138,31 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 				return;
 			}
 
-			var response = new StringBuilder($"Top {limit} messages for {date:MMMM d, yyyy}:\n\n");
-
-			var rank = 1;
-			foreach (var (url, authorId, total, reactions) in topMessages)
-			{
-				response.AppendLine($"#{rank}. <@{authorId}> - {url}");
-				var preview = await client.GetMessagePreview(url);
-				response.AppendLine($"```\n{preview}\n```");
-				response.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}  "))} [{total}] total reactions");
-				response.AppendLine();
-				response.AppendLine();
-				rank++;
-			}
-
-			await command.ModifyOriginalResponseAsync(msg => msg.Content = response.ToString());
+			var response = await FormatTopMessages(client, topMessages, $"Top {limit} messages for {date:MMMM d, yyyy}");
+			await command.ModifyOriginalResponseAsync(msg => msg.Content = response);
 		}
 		catch (Exception ex)
 		{
 			command.LogAndRespondWithError(_logger, ex, "Failed to get top messages");
 		}
+	}
+
+	public async Task<string> FormatTopMessages(DiscordSocketClient client, List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)> messages, string header)
+	{
+		var response = new StringBuilder($"{header}\n\n");
+
+		var rank = 1;
+		foreach (var (url, authorId, total, reactions) in messages)
+		{
+			response.AppendLine($"#{rank}. <@{authorId}> - {url}");
+			var preview = await client.GetMessagePreview(url);
+			response.AppendLine($"```\n{preview}\n```");
+			response.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}  "))} [{total}] total reactions");
+			response.AppendLine();
+			response.AppendLine();
+			rank++;
+		}
+
+		return response.ToString();
 	}
 }

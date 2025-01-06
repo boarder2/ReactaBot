@@ -13,6 +13,21 @@ Log.Logger = new LoggerConfiguration()
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.Services.AddSingleton(x =>
+{
+	return new DiscordSocketClient(new DiscordSocketConfig()
+	{
+		GatewayIntents =
+			GatewayIntents.DirectMessages |
+			GatewayIntents.GuildEmojis |
+			GatewayIntents.GuildIntegrations |
+			GatewayIntents.GuildMessageReactions |
+			GatewayIntents.GuildMessages |
+			GatewayIntents.Guilds |
+			GatewayIntents.MessageContent
+	});
+});
+
 // Register as singleton so we can resolve it in health checks
 builder.Services.AddSingleton<DiscordService>();
 // Use the previously registered singleton - If we just add it here, it can't be resolved by the health check.
@@ -34,12 +49,14 @@ builder.Services.AddSingleton<HttpClient>(provider =>
 });
 
 // builder.Services.AddSingleton<AuthService>();
-builder.Services.AddSingleton<AppConfiguration>();
-builder.Services.AddSingleton<DbHelper>();
-builder.Services.AddScoped<ReactionsService>();
-builder.Services.AddHealthChecks()
+builder.Services
+	.AddSingleton<AppConfiguration>()
+	.AddSingleton<DbHelper>()
+	.AddScoped<ReactionsService>()
+	.AddSingleton<IHealthCheckPublisher, Publisher>()
+	.AddHostedService<SchedulerService>()
+	.AddHealthChecks()
 	.AddCheck<DiscordHealth>("Discord Health");
-builder.Services.AddSingleton<IHealthCheckPublisher, Publisher>();
 
 var app = builder.Build();
 await app.RunAsync();

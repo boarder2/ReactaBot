@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 public class DbHelper
 {
-	private readonly long CurrentVersion = 0;
+	private readonly long CurrentVersion = 1;  // Increment version for new migration
 	private bool _initialized;
 	private readonly string DbFile;
 	private readonly ILogger<DbHelper> _logger;
@@ -13,6 +13,9 @@ public class DbHelper
 	public DbHelper(ILogger<DbHelper> logger, AppConfiguration config)
 	{
 		_logger = logger;
+
+		// Add custom type handler for Guid
+		SqlMapper.AddTypeHandler(new GuidTypeHandler());
 
 		if (string.IsNullOrWhiteSpace(config.DbLocation))
 		{
@@ -85,6 +88,21 @@ public class DbHelper
 							opted_out_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 						);
 						
+						CREATE TABLE scheduled_jobs (
+							id TEXT PRIMARY KEY,
+							cron_expression TEXT NOT NULL,
+							interval TEXT NOT NULL,
+							channel_id BIGINT NOT NULL,
+							guild_id BIGINT NOT NULL,
+							count INTEGER NOT NULL,
+							next_run TIMESTAMP WITH TIME ZONE NOT NULL,
+							created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+						);
+						
+						CREATE INDEX scheduled_jobs_guild_id_channel_id ON scheduled_jobs(guild_id, channel_id);
+						CREATE INDEX scheduled_jobs_next_run ON scheduled_jobs(next_run);
+						CREATE INDEX scheduled_jobs_id ON scheduled_jobs(id);
+
 						PRAGMA user_version=" + CurrentVersion + ";", transaction: tx);
 		tx.Commit();
 	}
@@ -116,21 +134,57 @@ public class DbHelper
 		}
 	}
 
+	public async Task<Guid> CreateScheduledJob(ScheduledJob job)
+	{
+		job.Id = Guid.NewGuid();
+		using var conn = GetConnection();
+		await conn.ExecuteAsync(@"
+				INSERT INTO scheduled_jobs (id, cron_expression, interval, channel_id, guild_id, count, next_run, created_at)
+				VALUES (@Id, @CronExpression, @Interval, @ChannelId, @GuildId, @Count, @NextRun, @CreatedAt)",
+			job);
+		return job.Id;
+	}
+
+	public async Task<List<ScheduledJob>> GetDueJobs()
+	{
+		using var conn = GetConnection();
+		return (await conn.QueryAsync<ScheduledJob>(@"
+				SELECT 
+					 CAST(id as TEXT) as Id,
+					 cron_expression as CronExpression,
+					 interval as Interval,
+					 channel_id as ChannelId,
+					 guild_id as GuildId,
+					 count as Count,
+					 next_run as NextRun,
+					 created_at as CreatedAt
+				FROM scheduled_jobs 
+				WHERE datetime(next_run) <= datetime('now')")).ToList();
+	}
+
+	public async Task UpdateJobNextRun(Guid jobId, DateTimeOffset nextRun)
+	{
+		using var conn = GetConnection();
+		await conn.ExecuteAsync(
+			"UPDATE scheduled_jobs SET next_run = @NextRun WHERE id = @JobId",
+			new { JobId = jobId.ToString(), NextRun = nextRun });
+	}
+
 	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(
-		DateTimeOffset date, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
+		DateTimeOffset startDate, DateTimeOffset endDate, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
 	{
 		using var connection = GetConnection();
 		await connection.OpenAsync();
 
 		var sql = """
 			SELECT m.url, m.author, m.total_reactions, 
-				   GROUP_CONCAT(r.emoji || ':' || r.reaction_count) as reactions
+					GROUP_CONCAT(r.emoji || ':' || r.reaction_count) as reactions
 			FROM messages m
 			LEFT JOIN reactions r ON m.id = r.message_id
-			WHERE DATE(m.timestamp) = DATE(@Date)
+			WHERE datetime(m.timestamp) BETWEEN datetime(@StartDate) AND datetime(@EndDate)
 			AND m.guild_id = @GuildId
 		""";
-		
+
 		if (channelId.HasValue)
 		{
 			sql += " AND m.channel_id = @ChannelId";
@@ -149,7 +203,7 @@ public class DbHelper
 
 		var results = await connection.QueryAsync<(string url, ulong authorId, int total, string reactions)>(
 			sql,
-			new { Date = date.Date, Limit = limit, GuildId = guildId, UserId = userId }
+			new { StartDate = startDate, EndDate = endDate, Limit = limit, GuildId = guildId, UserId = userId }
 		);
 
 		return results.Select(r => (
@@ -161,6 +215,13 @@ public class DbHelper
 				.Select(x => x.Split(':'))
 				.ToDictionary(x => x[0], x => int.Parse(x[1])) ?? new Dictionary<string, int>()
 		)).ToList();
+	}
+
+	// Keep the old method for compatibility but have it call the new one
+	public Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(
+		DateTimeOffset date, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
+	{
+		return GetTopMessages(date.Date, date.Date.AddDays(1), limit, guildId, channelId, userId);
 	}
 
 	public async Task OptOutUser(ulong userId)
@@ -180,8 +241,8 @@ public class DbHelper
 
 			// Delete user's messages
 			await conn.ExecuteAsync(
-				"DELETE FROM messages WHERE author = @UserId", 
-				new { UserId = userId }, 
+				"DELETE FROM messages WHERE author = @UserId",
+				new { UserId = userId },
 				transaction);
 
 			// Add user to opted out table
@@ -189,7 +250,7 @@ public class DbHelper
 				INSERT INTO opted_out_users (user_id)
 				VALUES (@UserId)
 				ON CONFLICT (user_id) DO NOTHING;",
-				new { UserId = userId }, 
+				new { UserId = userId },
 				transaction);
 
 			transaction.Commit();
@@ -217,5 +278,70 @@ public class DbHelper
 		await conn.ExecuteAsync(
 			"DELETE FROM opted_out_users WHERE user_id = @UserId",
 			new { UserId = userId });
+	}
+
+	public async Task<List<ScheduledJob>> GetGuildSchedules(ulong guildId)
+	{
+		using var conn = GetConnection();
+		return (await conn.QueryAsync<ScheduledJob>(@"
+				SELECT 
+					 CAST(id as TEXT) as Id,
+					 cron_expression as CronExpression,
+					 interval as Interval,
+					 channel_id as ChannelId,
+					 guild_id as GuildId,
+					 count as Count,
+					 next_run as NextRun,
+					 created_at as CreatedAt
+				FROM scheduled_jobs 
+				WHERE guild_id = @GuildId
+				ORDER BY next_run ASC",
+			new { GuildId = guildId })).ToList();
+	}
+
+	public async Task<ScheduledJob> GetScheduleById(string id)
+	{
+		if (!Guid.TryParse(id, out var guid))
+			return null;
+
+		using var conn = GetConnection();
+		return await conn.QuerySingleOrDefaultAsync<ScheduledJob>(@"
+				SELECT 
+					 CAST(id as TEXT) as Id,
+					 cron_expression as CronExpression,
+					 interval as Interval,
+					 channel_id as ChannelId,
+					 guild_id as GuildId,
+					 count as Count,
+					 next_run as NextRun,
+					 created_at as CreatedAt
+				FROM scheduled_jobs 
+				WHERE UPPER(id) = UPPER(@Id)",
+			new { Id = guid.ToString() });
+	}
+
+	public async Task DeleteSchedule(string id)
+	{
+		if (!Guid.TryParse(id, out var guid))
+			return;
+
+		using var conn = GetConnection();
+		await conn.ExecuteAsync(
+			"DELETE FROM scheduled_jobs WHERE UPPER(id) = UPPER(@Id)",
+			new { Id = guid.ToString() });
+	}
+
+	// Add this class inside DbHelper
+	private class GuidTypeHandler : SqlMapper.TypeHandler<Guid>
+	{
+		public override Guid Parse(object value)
+		{
+			return Guid.Parse((string)value);
+		}
+
+		public override void SetValue(IDbDataParameter parameter, Guid value)
+		{
+			parameter.Value = value.ToString();
+		}
 	}
 }
