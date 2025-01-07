@@ -50,7 +50,21 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 					.WithContextTypes(InteractionContextType.Guild)
 					.WithDescription("Schedule recurring top messages report")
 					.AddOption("cron", ApplicationCommandOptionType.String, "Cron expression for scheduling (e.g. '0 */4 * * *')", isRequired: true)
-					.AddOption("interval", ApplicationCommandOptionType.String, "Time interval to analyze (1h,4h,8h,12h,24h,2d,3d,5d,7d)", isRequired: true)
+					.AddOption(new SlashCommandOptionBuilder()
+						.WithName("interval")
+						.WithRequired(true)
+						.WithType(ApplicationCommandOptionType.String)
+						.WithDescription("Time interval to analyze")
+						.AddChoice("1h", "1h")
+						.AddChoice("4h", "4h")
+						.AddChoice("8h", "8h")
+						.AddChoice("12h", "12h")
+						.AddChoice("24h", "24h")
+						.AddChoice("2d", "2d")
+						.AddChoice("3d", "3d")
+						.AddChoice("5d", "5d")
+						.AddChoice("7d", "7d")
+					)
 					.AddOption("channel", ApplicationCommandOptionType.Channel, "Channel to post results", isRequired: true)
 					.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-50)", isRequired: true),
 				new SlashCommandBuilder()
@@ -72,10 +86,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 
 			try
 			{
-				foreach (var command in commands)
-				{
-					await _client.CreateGlobalApplicationCommandAsync(command.Build());
-				}
+				await _client.BulkOverwriteGlobalApplicationCommandsAsync(commands.Select(x => x.Build()).ToArray());
 			}
 			catch (Exception ex)
 			{
@@ -118,23 +129,41 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		switch (command.CommandName)
 		{
 			case "top":
-				await command.DeferAsync();
+				await command.DeferAsync(ephemeral: true);
 				await _reactionService.PrintTopReactions(_client, command);
 				break;
 			case "optout":
+				await command.DeferAsync(ephemeral: true);
 				await _db.OptOutUser(command.User.Id);
-				await command.RespondAsync("You have been opted out. Reactions to your messages will no longer be tracked. Any existing tracked messages have been removed.", ephemeral: true);
+				await command.ModifyOriginalResponseAsync(x => x.Embed =
+					new EmbedBuilder()
+						.WithTitle("Opt Out Success")
+						.WithColor(Color.LightOrange)
+						.WithDescription("You have been opted out. Reactions to your messages will no longer be tracked. Any existing tracked messages have been removed.")
+						.Build());
 				break;
 			case "optin":
+				await command.DeferAsync(ephemeral: true);
 				await _db.OptInUser(command.User.Id);
-				await command.RespondAsync("You have been opted back in. Reactions to your messages will now be tracked.", ephemeral: true);
+				await command.ModifyOriginalResponseAsync(x => x.Embed =
+					new EmbedBuilder()
+						.WithTitle("Opt In Success")
+						.WithColor(Color.Green)
+						.WithDescription("You have been opted back in. Reactions to your messages will now be tracked.")
+						.Build());
 				break;
 			case "optstatus":
+				await command.DeferAsync(ephemeral: true);
 				bool isOptedOut = await _db.IsUserOptedOut(command.User.Id);
-				string status = isOptedOut 
-					? "You are currently opted out. Reactions to your messages are not being tracked." 
+				string status = isOptedOut
+					? "You are currently opted out. Reactions to your messages are not being tracked."
 					: "You are currently opted in. Reactions to your messages are being tracked.";
-				await command.RespondAsync(status, ephemeral: true);
+				await command.ModifyOriginalResponseAsync(x => x.Embed =
+					new EmbedBuilder()
+						.WithTitle("Opt In Status")
+						.WithColor(isOptedOut ? Color.LightOrange : Color.Green)
+						.WithDescription(status)
+						.Build());
 				break;
 			case "schedule":
 				await HandleScheduleCommand(command);
@@ -153,6 +182,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 
 	private async Task HandleScheduleCommand(SocketSlashCommand command)
 	{
+		await command.DeferAsync(ephemeral: true);
 		var cronExpr = (string)command.Data.Options.First(x => x.Name == "cron").Value;
 		var interval = (string)command.Data.Options.First(x => x.Name == "interval").Value;
 		var channel = (ITextChannel)command.Data.Options.First(x => x.Name == "channel").Value;
@@ -161,7 +191,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		// Validate inputs
 		if (!IsValidInterval(interval))
 		{
-			await command.RespondAsync("Invalid interval. Use: 1h,4h,8h,12h,24h,2d,3d,5d,7d", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid interval. Use: 1h,4h,8h,12h,24h,2d,3d,5d,7d"));
 			return;
 		}
 
@@ -171,13 +201,13 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		}
 		catch
 		{
-			await command.RespondAsync("Invalid cron expression", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid cron expression"));
 			return;
 		}
 
 		if (count < 1 || count > 50)
 		{
-			await command.RespondAsync("Count must be between 1 and 50", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Count must be between 1 and 50"));
 			return;
 		}
 
@@ -185,7 +215,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		var nextRun = expression.GetNextOccurrence(DateTime.UtcNow);
 		if (!nextRun.HasValue)
 		{
-			await command.RespondAsync("Invalid cron expression - could not determine next run time", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid cron expression - could not determine next run time"));
 			return;
 		}
 
@@ -201,95 +231,85 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		};
 
 		await _db.CreateScheduledJob(job);
-		await command.RespondAsync(
+		await command.ModifyOriginalResponseAsync(x => x.Embed = SuccessEmbed(
 			$"Scheduled job created. Will post top {count} messages for the last `{interval}` to {channel.Mention}\n" +
-			$"Schedule: `{cronExpr}`\nNext run: {nextRun.Value:yyyy-MM-dd HH:mm:ss} UTC", 
-			ephemeral: true);
+			$"Schedule: `{cronExpr}`\nNext run: {nextRun.Value:yyyy-MM-dd HH:mm:ss} UTC"));
 	}
 
 	private async Task HandleGetSchedulesCommand(SocketSlashCommand command)
 	{
-		if (!command.GuildId.HasValue)
-		{
-			await command.RespondAsync("This command can only be used in servers!", ephemeral: true);
-			return;
-		}
-
+		await command.DeferAsync(ephemeral: true);
 		var schedules = await _db.GetGuildSchedules(command.GuildId.Value);
-		if (!schedules.Any())
+		if (schedules.Count == 0)
 		{
-			await command.RespondAsync("No scheduled reports found for this server.", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = SuccessEmbed("No scheduled reports found for this server."));
 			return;
 		}
 
 		var response = FormatSchedules(schedules);
-		await command.RespondAsync(response, ephemeral: true);
+
+		var eb = new EmbedBuilder()
+			.WithTitle("Scheduled Reports")
+			.WithDescription(response)
+			.WithColor(Color.Blue);
+
+		await command.ModifyOriginalResponseAsync(x => x.Embeds = new[] { eb.Build() });
 	}
 
 	private async Task HandleRemoveScheduleCommand(SocketSlashCommand command)
 	{
-		if (!command.GuildId.HasValue)
-		{
-			await command.RespondAsync("This command can only be used in servers!", ephemeral: true);
-			return;
-		}
+		await command.DeferAsync(ephemeral: true);
 
 		var id = (string)command.Data.Options.First(x => x.Name == "id").Value;
 		if (!Guid.TryParse(id, out _))
 		{
-			await command.RespondAsync("Invalid schedule ID format.", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid schedule ID format."));
 			return;
 		}
 
 		var schedule = await _db.GetScheduleById(id);
 
-		if (schedule == null)
+		if ((schedule == null) || (schedule.GuildId != command.GuildId.Value))
 		{
-			await command.RespondAsync("Schedule not found.", ephemeral: true);
-			return;
-		}
-
-		if (schedule.GuildId != command.GuildId.Value)
-		{
-			await command.RespondAsync("That schedule belongs to a different server.", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Schedule not found."));
 			return;
 		}
 
 		await _db.DeleteSchedule(id);
-		await command.RespondAsync($"Schedule {id} has been removed.", ephemeral: true);
+		await command.ModifyOriginalResponseAsync(x => x.Embed = SuccessEmbed($"Schedule {id} has been removed."));
 	}
 
 	private async Task HandleDeleteCommand(SocketSlashCommand command)
 	{
-		if (!command.GuildId.HasValue)
-		{
-			await command.RespondAsync("This command can only be used in servers!", ephemeral: true);
-			return;
-		}
+		await command.DeferAsync(ephemeral: true);
 
 		var channel = command.Data.Options.FirstOrDefault(x => x.Name == "channel")?.Value as ITextChannel;
 		var user = command.Data.Options.FirstOrDefault(x => x.Name == "user")?.Value as SocketUser;
 
 		if (channel == null && user == null)
 		{
-			await command.RespondAsync("You must specify at least one of: channel or user", ephemeral: true);
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("You must specify at least one of: channel or user"));
 			return;
 		}
 
-		await command.DeferAsync(ephemeral: true);
 		var count = await _db.DeleteMessages(command.GuildId.Value, channel?.Id, user?.Id);
-		
-		var response = new StringBuilder("Deleted reactions for:");
+
+		var response = new StringBuilder();
 		if (channel != null) response.AppendLine($"\nChannel: {channel.Mention}");
 		if (user != null) response.AppendLine($"\nUser: {user.Mention}");
 		response.AppendLine($"\nTotal messages and reactions deleted: {count}");
 
-		await command.FollowupAsync(response.ToString(), ephemeral: true);
+		await command.ModifyOriginalResponseAsync(x => x.Embed = 
+			new EmbedBuilder()
+				.WithTitle("Deleted Reactions and Messages")
+				.WithColor(Color.Red)
+				.WithDescription(response.ToString())
+				.Build());
 	}
 
 	private string FormatSchedules(List<ScheduledJob> schedules)
 	{
-		var sb = new StringBuilder("Scheduled Reports:\n\n");
+		var sb = new StringBuilder();
 		foreach (var job in schedules)
 		{
 			sb.AppendLine($"**ID: `{job.Id}`**");
@@ -306,5 +326,23 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 	private bool IsValidInterval(string interval)
 	{
 		return new[] { "1h", "4h", "8h", "12h", "24h", "2d", "3d", "5d", "7d" }.Contains(interval);
+	}
+
+	private Embed ErrorEmbed(string message, string title = "Error")
+	{
+		return new EmbedBuilder()
+			.WithTitle(title)
+			.WithDescription(message)
+			.WithColor(Color.Red)
+			.Build();
+	}
+
+	private Embed SuccessEmbed(string message, string title = "Success")
+	{
+		return new EmbedBuilder()
+			.WithTitle(title)
+			.WithDescription(message)
+			.WithColor(Color.Green)
+			.Build();
 	}
 }

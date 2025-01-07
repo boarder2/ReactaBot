@@ -139,8 +139,12 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 				return;
 			}
 
-			var response = await FormatTopMessages(client, topMessages, $"Top {limit} messages for {date:MMMM d, yyyy}");
-			await command.ModifyOriginalResponseAsync(msg => msg.Content = response);
+			var response = await FormatTopMessages(client, topMessages);
+			await command.ModifyOriginalResponseAsync(msg =>
+			{
+				msg.Content = $"**Top {limit} messages for {date:MMMM d, yyyy}**";
+				msg.Embeds = response;
+			});
 		}
 		catch (Exception ex)
 		{
@@ -148,22 +152,22 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 		}
 	}
 
-	public async Task<string> FormatTopMessages(DiscordSocketClient client, List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)> messages, string header)
+	public async Task<Embed[]> FormatTopMessages(DiscordSocketClient client, List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)> messages)
 	{
-		var response = new StringBuilder($"{header}\n\n");
-
+		var embeds = new List<Embed>();
 		var rank = 1;
 		foreach (var (url, authorId, total, reactions) in messages)
 		{
-			response.AppendLine($"#{rank}. <@{authorId}> - {url}");
+			var sb = new StringBuilder();
 			var preview = await client.GetMessagePreview(url);
-			response.AppendLine($"```\n{preview}\n```");
-			response.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}  "))} [{total}] total reactions");
-			response.AppendLine();
-			response.AppendLine();
+			sb.AppendLine($"<@{authorId}>: `{preview}`");
+			sb.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}"))}");
+			embeds.Add(new EmbedBuilder()
+				.WithTitle($"#{rank}. {url}")
+				.WithDescription(sb.ToString())
+				.Build());
 			rank++;
 		}
-
-		return response.ToString();
+		return embeds.ToArray();
 	}
 }

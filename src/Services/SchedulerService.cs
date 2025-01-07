@@ -1,3 +1,4 @@
+using System.Net.Mime;
 using Cronos;
 
 public class SchedulerService : IHostedService
@@ -124,9 +125,9 @@ public class SchedulerService : IHostedService
 
 		if (messages.Any())
 		{
-			var header = $"Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
-			var response = await _reactionsService.FormatTopMessages(_client, messages, header);
-			await channel.SendMessageAsync(response);
+			var header = $"**Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC**)";
+			var response = await _reactionsService.FormatTopMessages(_client, messages);
+			await channel.SendMessageAsync(header, embeds: response);
 			_logger.LogInformation("Successfully executed job");
 		}
 		else
