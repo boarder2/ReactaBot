@@ -5,7 +5,7 @@ ARG BUILD_VERSION="1.0.0.0"
 
 COPY . .
 
-RUN dotnet publish -c Release src/shacknews-discord-auth-bot.csproj -o /build/output /p:BuildVersion=${BUILD_VERSION}
+RUN dotnet publish -c Release src/reactabot.csproj -o /build/output /p:BuildVersion=${BUILD_VERSION}
 
 FROM mcr.microsoft.com/dotnet/runtime:8.0-alpine
 
@@ -16,4 +16,4 @@ COPY --from=build /build/output/ .
 ENV DOCKER_HEALTHCHECK_FILEPATH=/dotnetapp/health.txt
 
 HEALTHCHECK CMD test $(find $DOCKER_HEALTHCHECK_FILEPATH -mmin -3 | wc -l) -gt 0
-ENTRYPOINT ["dotnet", "shacknews-discord-auth-bot.dll"]
+ENTRYPOINT ["dotnet", "reactabot.dll"]
