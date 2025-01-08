@@ -159,7 +159,7 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 		foreach (var (url, authorId, total, reactions) in messages)
 		{
 			var sb = new StringBuilder();
-			var preview = await client.GetMessagePreview(url);
+			var preview = await client.GetMessagePreview(url, _logger);
 			sb.AppendLine($"<@{authorId}>: `{preview}`");
 			sb.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}"))}");
 			embeds.Add(new EmbedBuilder()

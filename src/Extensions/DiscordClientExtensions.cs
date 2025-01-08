@@ -1,6 +1,6 @@
 public static class DiscordSocketClientExtensions
 {
-	public static async Task<IMessage> GetMessageFromUrl(this DiscordSocketClient client, string url, ILogger logger = null)
+	public static async Task<IMessage> GetMessageFromUrl(this DiscordSocketClient client, string url, ILogger logger)
 	{
 		try
 		{
@@ -26,11 +26,11 @@ public static class DiscordSocketClientExtensions
 		}
 	}
 
-	public static async Task<string> GetMessagePreview(this DiscordSocketClient client, string url, int truncateLength = 100, ILogger logger = null)
+	public static async Task<string> GetMessagePreview(this DiscordSocketClient client, string url, ILogger logger, int truncateLength = 100)
 	{
 		try
 		{
-			var message = await client.GetMessageFromUrl(url);
+			var message = await client.GetMessageFromUrl(url, logger);
 			if (message == null)
 			{
 				return "(Message content unavailable)";
