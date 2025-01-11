@@ -52,14 +52,16 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 			await connection.ExecuteAsync(deleteSql, new { MessageId = msg.Id }, transaction);
 
 			// Insert current reactions
-			var insertSql = "INSERT INTO reactions(message_id, emoji, reaction_count) VALUES(@MessageId, @Emoji, @ReactionCount)";
+			var insertSql = "INSERT INTO reactions(message_id, emoji, reaction_count, reaction_id) VALUES(@MessageId, @Emoji, @ReactionCount, @ReactionId)";
 			foreach (var react in msg.Reactions)
 			{
+				var emote = react.Key as Emote;
 				await connection.ExecuteAsync(insertSql, new
 				{
 					MessageId = msg.Id,
 					Emoji = react.Key.Name,
-					react.Value.ReactionCount
+					react.Value.ReactionCount,
+					ReactionId = emote?.Id
 				}, transaction);
 			}
 
@@ -142,8 +144,7 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 			var response = await FormatTopMessages(client, topMessages);
 			await command.ModifyOriginalResponseAsync(msg =>
 			{
-				msg.Content = $"**Top {limit} messages for {date:MMMM d, yyyy}**";
-				msg.Embeds = response;
+				msg.Content = $"**Top {limit} messages for {date:MMMM d, yyyy}**\n" + response;
 			});
 		}
 		catch (Exception ex)
@@ -152,22 +153,26 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 		}
 	}
 
-	public async Task<Embed[]> FormatTopMessages(DiscordSocketClient client, List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)> messages)
+	public async Task<string> FormatTopMessages(DiscordSocketClient client,
+		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages)
 	{
 		var embeds = new List<Embed>();
 		var rank = 1;
+		var sb = new StringBuilder();
+
 		foreach (var (url, authorId, total, reactions) in messages)
 		{
-			var sb = new StringBuilder();
+			sb.AppendLine($"#{rank}. {url}");
 			var preview = await client.GetMessagePreview(url, _logger);
 			sb.AppendLine($"<@{authorId}>: `{preview}`");
-			sb.AppendLine($"{string.Join(" ", reactions.Select(r => $"{r.Key} {r.Value}"))}");
-			embeds.Add(new EmbedBuilder()
-				.WithTitle($"#{rank}. {url}")
-				.WithDescription(sb.ToString())
-				.Build());
+			sb.AppendLine(string.Join(" ", reactions.Select(r =>
+				r.Value.reactionId.HasValue ?
+				$"<:{r.Key}:{r.Value.reactionId}> {r.Value.count}" :
+				$"{r.Key} {r.Value.count}"
+			)));
+			sb.AppendLine();
 			rank++;
 		}
-		return embeds.ToArray();
+		return sb.ToString();
 	}
 }

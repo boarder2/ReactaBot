@@ -4,3 +4,4 @@ It is written in C#
 Use primary constructors when possible
 Use dependency injection for services
 Use sqlite for data storage
+Use tabs for indentation

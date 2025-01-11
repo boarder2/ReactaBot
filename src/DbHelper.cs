@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 public class DbHelper
 {
-	private readonly long CurrentVersion = 0;  // Increment version for new migration
+	private readonly long CurrentVersion = 0;
 	private bool _initialized;
 	private readonly string DbFile;
 	private readonly ILogger<DbHelper> _logger;
@@ -64,13 +64,13 @@ public class DbHelper
 			 @"
 						CREATE TABLE messages
 						(
-							id INTEGER PRIMARY KEY,
-							guild_id INTEGER,
-							channel_id INTEGER,
+							id BIGINT PRIMARY KEY,
+							guild_id BIGINT,
+							channel_id BIGINT,
 							author INTEGER NOT NULL,
 							url VARCHAR(300) NOT NULL,
 							timestamp INTEGER NOT NULL DEFAULT(datetime('now')),
-							total_reactions INTEGER NOT NULL DEFAULT 0
+							total_reactions BIGINT NOT NULL DEFAULT 0
 						);
 						CREATE INDEX messages_guild_id_author ON messages(guild_id, author);
 						CREATE INDEX messages_guild_id_timestamp_total_reactions ON messages(guild_id, timestamp, total_reactions);
@@ -79,9 +79,10 @@ public class DbHelper
 						CREATE TABLE reactions
 						(
 							id INTEGER PRIMARY KEY,
-							message_id INTEGER NOT NULL,
+							message_id BIGINT NOT NULL,
 							reaction_count INTEGER NOT NULL DEFAULT 1,
 							emoji VARCHAR(50) NOT NULL,
+							reaction_id BIGINT NULL,
 							FOREIGN KEY(message_id) REFERENCES messages(id)
 						);
 
@@ -172,7 +173,7 @@ public class DbHelper
 			new { JobId = jobId.ToString().ToLowerInvariant(), NextRun = nextRun });
 	}
 
-	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(
+	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)>> GetTopMessages(
 		DateTimeOffset startDate, DateTimeOffset endDate, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
 	{
 		using var connection = GetConnection();
@@ -180,7 +181,7 @@ public class DbHelper
 
 		var sql = """
 			SELECT m.url, m.author, m.total_reactions, 
-					GROUP_CONCAT(r.emoji || ':' || r.reaction_count) as reactions
+					GROUP_CONCAT(r.emoji || ':' || r.reaction_count || ':' || COALESCE(r.reaction_id, '')) as reactions
 			FROM messages m
 			LEFT JOIN reactions r ON m.id = r.message_id
 			WHERE datetime(m.timestamp) BETWEEN datetime(@StartDate) AND datetime(@EndDate)
@@ -215,12 +216,14 @@ public class DbHelper
 			r.reactions?.Split(',')
 				.Where(x => !string.IsNullOrEmpty(x))
 				.Select(x => x.Split(':'))
-				.ToDictionary(x => x[0], x => int.Parse(x[1])) ?? new Dictionary<string, int>()
+				.ToDictionary(
+					x => x[0],
+					x => (count: int.Parse(x[1]), reactionId: !string.IsNullOrEmpty(x[2]) ? (ulong?)ulong.Parse(x[2]) : null)
+				) ?? new Dictionary<string, (int count, ulong? reactionId)>()
 		)).ToList();
 	}
 
-	// Keep the old method for compatibility but have it call the new one
-	public Task<List<(string url, ulong authorId, int total, Dictionary<string, int> reactions)>> GetTopMessages(
+	public Task<List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)>> GetTopMessages(
 		DateTimeOffset date, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
 	{
 		return GetTopMessages(date.Date, date.Date.AddDays(1), limit, guildId, channelId, userId);
