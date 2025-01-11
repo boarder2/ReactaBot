@@ -3,6 +3,8 @@ using System.Text;
 
 public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<ReactionsService> _logger)
 {
+	private const string TOO_MANY_RESULTS = "\n**Too many results for one message!**";
+	private readonly int TOO_MANY_RESULTS_LENGTH = TOO_MANY_RESULTS.Length;
 	public async Task UpdateMessageReactions(IMessage msg)
 	{
 		if (await _db.IsUserOptedOut(msg.Author.Id))
@@ -156,23 +158,88 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 	public async Task<string> FormatTopMessages(DiscordSocketClient client,
 		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages)
 	{
-		var embeds = new List<Embed>();
-		var rank = 1;
-		var sb = new StringBuilder();
+		const int maxPreviewLength = 100;
+		const int minPreviewLength = 15;
+		const int previewDecrement = 20;
 
-		foreach (var (url, authorId, total, reactions) in messages)
+		// Get all previews once
+		var previewCache = new Dictionary<string, string>();
+		foreach (var (url, _, _, _) in messages)
 		{
-			sb.AppendLine($"#{rank}. {url}");
-			var preview = await client.GetMessagePreview(url, _logger);
-			sb.AppendLine($"<@{authorId}>: `{preview}`");
-			sb.AppendLine(string.Join(" ", reactions.Select(r =>
-				r.Value.reactionId.HasValue ?
-				$"<:{r.Key}:{r.Value.reactionId}> {r.Value.count}" :
-				$"{r.Key} {r.Value.count}"
-			)));
-			sb.AppendLine();
-			rank++;
+			var preview = await client.GetMessagePreview(url, _logger, maxPreviewLength);
+			previewCache[url] = preview;
 		}
+
+		// Try different preview lengths without additional API calls
+		for (int previewLength = maxPreviewLength; previewLength >= minPreviewLength; previewLength -= previewDecrement)
+		{
+			var result = TryFormatMessagesWithCache(messages, previewCache, previewLength);
+			if (result != null)
+			{
+				return result;
+			}
+		}
+
+		// Final attempt with minimum length + TOO_MANY_RESULTS if needed
+		return TryFormatMessagesWithCache(messages, previewCache, minPreviewLength, true) ?? "";
+	}
+
+	private string? TryFormatMessagesWithCache(
+		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages,
+		Dictionary<string, string> previewCache,
+		int previewLength,
+		bool isLastAttempt = false)
+	{
+		var sb = new StringBuilder();
+		var rank = 1;
+
+		foreach (var message in messages)
+		{
+			var messageText = FormatSingleMessageWithCache(message, previewCache, rank, previewLength);
+			
+			if (sb.Length + messageText.Length < (2000 - TOO_MANY_RESULTS_LENGTH))
+			{
+				sb.Append(messageText);
+				rank++;
+			}
+			else
+			{
+				if (isLastAttempt)
+				{
+					sb.Append(TOO_MANY_RESULTS);
+					return sb.ToString();
+				}
+				return null;
+			}
+		}
+
+		return sb.ToString();
+	}
+
+	private string FormatSingleMessageWithCache(
+		(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions) message,
+		Dictionary<string, string> previewCache,
+		int rank,
+		int previewLength)
+	{
+		var (url, authorId, _, reactions) = message;
+		var sb = new StringBuilder();
+		
+		var preview = previewCache[url];
+		if (preview.Length > previewLength)
+		{
+			preview = preview[..previewLength] + "...";
+		}
+		
+		sb.AppendLine($"#{rank}. {url}");
+		sb.AppendLine($"<@{authorId}>: `{preview}`");
+		sb.AppendLine(string.Join(" ", reactions.Select(r =>
+			r.Value.reactionId.HasValue ?
+			$"<:{r.Key}:{r.Value.reactionId}> {r.Value.count}" :
+			$"{r.Key} {r.Value.count}"
+		)));
+		sb.AppendLine();
+
 		return sb.ToString();
 	}
 }

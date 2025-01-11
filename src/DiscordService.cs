@@ -35,7 +35,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 					.AddOption("date", ApplicationCommandOptionType.String, "Date in YYYY-MM-DD format - Defaults to today", isRequired: false, isAutocomplete:true)
 					.AddOption("channel", ApplicationCommandOptionType.Channel, "Filter by channel", isRequired: false, isAutocomplete: true)
 					.AddOption("user", ApplicationCommandOptionType.User, "Filter by user", isRequired: false, isAutocomplete: true)
-					.AddOption("limit", ApplicationCommandOptionType.Integer, "Number of messages to show (1-50) - Defaults to 10", isRequired: false),
+					.AddOption("limit", ApplicationCommandOptionType.Integer, "Number of messages to show (1-10) - Defaults to 10", isRequired: false),
 				new SlashCommandBuilder()
 					.WithName("optout")
 					.WithDescription("Opt out of having reactions to your reactions tracked by the bot"),
@@ -66,7 +66,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 						.AddChoice("7d", "7d")
 					)
 					.AddOption("channel", ApplicationCommandOptionType.Channel, "Channel to post results", isRequired: true)
-					.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-50)", isRequired: true),
+					.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-10)", isRequired: true),
 				new SlashCommandBuilder()
 					.WithName("getschedules")
 					.WithContextTypes(InteractionContextType.Guild)
@@ -205,9 +205,9 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 			return;
 		}
 
-		if (count < 1 || count > 50)
+		if (count < 1 || count > 10)
 		{
-			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Count must be between 1 and 50"));
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Count must be between 1 and 10"));
 			return;
 		}
 

@@ -17,10 +17,10 @@ builder.Services.AddSingleton(x =>
 {
 	return new DiscordSocketClient(new DiscordSocketConfig()
 	{
+		// AlwaysDownloadUsers = true,
+		DefaultRetryMode = RetryMode.AlwaysRetry,
 		GatewayIntents =
-			// GatewayIntents.DirectMessages |
-			// GatewayIntents.GuildEmojis |
-			// GatewayIntents.GuildIntegrations |
+			// GatewayIntents.GuildMembers |
 			GatewayIntents.GuildMessageReactions |
 			GatewayIntents.GuildMessages |
 			GatewayIntents.Guilds |
@@ -35,18 +35,6 @@ builder.Services.AddHostedService(provider => provider.GetRequiredService<Discor
 
 builder.Logging.ClearProviders();
 builder.Services.AddSerilog();
-
-builder.Services.AddSingleton<HttpClient>(provider =>
-{
-	var handler = new HttpClientHandler();
-	if (handler.SupportsAutomaticDecompression)
-	{
-		handler.AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate;
-	}
-	var client = new HttpClient(handler);
-	client.DefaultRequestHeaders.UserAgent.ParseAdd("Shacknews Discord Auth Bot");
-	return client;
-});
 
 // builder.Services.AddSingleton<AuthService>();
 builder.Services
