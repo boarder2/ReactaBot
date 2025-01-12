@@ -31,9 +31,9 @@ public static class DiscordSocketClientExtensions
 		try
 		{
 			var message = await client.GetMessageFromUrl(url, logger);
-			if (message == null)
+			if (string.IsNullOrEmpty(message?.Content))
 			{
-				return "(Message content unavailable)";
+				return "(No content)";
 			}
 
 			var content = message.Content;
