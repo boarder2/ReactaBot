@@ -66,7 +66,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 						.AddChoice("7d", "7d")
 					)
 					.AddOption("channel", ApplicationCommandOptionType.Channel, "Channel to post results", isRequired: true)
-					.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-10)", isRequired: true),
+					.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-20)", isRequired: true),
 				new SlashCommandBuilder()
 					.WithName("getschedules")
 					.WithContextTypes(InteractionContextType.Guild)
@@ -205,9 +205,9 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 			return;
 		}
 
-		if (count < 1 || count > 10)
+		if (count < 1 || count > 20)
 		{
-			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Count must be between 1 and 10"));
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Count must be between 1 and 20"));
 			return;
 		}
 

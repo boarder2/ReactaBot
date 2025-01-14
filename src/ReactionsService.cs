@@ -184,6 +184,61 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 		return TryFormatMessagesWithCache(messages, previewCache, minPreviewLength, true) ?? "";
 	}
 
+	public async Task<List<string>> FormatTopMessagesMultiPart(
+		DiscordSocketClient client,
+		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages,
+		string header)
+	{
+		const int maxPreviewLength = 100;
+		var result = new List<string>();
+		var currentPart = new StringBuilder();
+		var rank = 1;
+		var partNumber = 1;
+
+		// Get all previews once
+		var previewCache = new Dictionary<string, string>();
+		foreach (var (url, _, _, _) in messages)
+		{
+			var preview = await client.GetMessagePreview(url, _logger, maxPreviewLength);
+			previewCache[url] = preview;
+		}
+
+		// Start first part with header
+		currentPart.AppendLine($"{header} (Part 1/?)");
+
+		foreach (var message in messages)
+		{
+			var messageText = FormatSingleMessageWithCache(message, previewCache, rank, maxPreviewLength);
+			
+			if (currentPart.Length + messageText.Length < 2000)
+			{
+				currentPart.Append(messageText);
+			}
+			else
+			{
+				result.Add(currentPart.ToString());
+				currentPart.Clear();
+				partNumber++;
+				currentPart.AppendLine($"{header} (Part {partNumber}/?)");
+				currentPart.Append(messageText);
+			}
+			rank++;
+		}
+
+		if (currentPart.Length > 0)
+		{
+			result.Add(currentPart.ToString());
+		}
+
+		// Update headers with correct total part count
+		for (int i = 0; i < result.Count; i++)
+		{
+			result[i] = result[i].Replace("/?)", $"/{result.Count})");
+		}
+
+		return result;
+	}
+
 	private string? TryFormatMessagesWithCache(
 		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages,
 		Dictionary<string, string> previewCache,

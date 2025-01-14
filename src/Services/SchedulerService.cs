@@ -126,9 +126,12 @@ public class SchedulerService : IHostedService
 		if (messages.Any())
 		{
 			var header = $"**Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC**)";
-			var response = await _reactionsService.FormatTopMessages(_client, messages);
-			await channel.SendMessageAsync(header + "\n" + response);
-			_logger.LogInformation("Successfully executed job");
+			var messageParts = await _reactionsService.FormatTopMessagesMultiPart(_client, messages, header);
+			foreach (var part in messageParts)
+			{
+				await channel.SendMessageAsync(part);
+			}
+			_logger.LogInformation("Successfully executed job with {Count} message parts", messageParts.Count);
 		}
 		else
 		{
