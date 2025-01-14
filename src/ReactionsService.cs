@@ -288,7 +288,7 @@ public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<Re
 		
 		sb.AppendLine($"#{rank}. {url}");
 		sb.AppendLine($"<@{authorId}>: `{preview}`");
-		sb.AppendLine(string.Join(" ", reactions.Select(r =>
+		sb.AppendLine(string.Join(" ", reactions.Select(r =>
 			r.Value.reactionId.HasValue ?
 			$"<:{r.Key}:{r.Value.reactionId}> {r.Value.count}" :
 			$"{r.Key} {r.Value.count}"
