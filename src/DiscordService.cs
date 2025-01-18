@@ -108,7 +108,10 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 					.WithContextTypes(InteractionContextType.Guild)
 					.WithDescription("Delete stored reactions")
 					.AddOption("channel", ApplicationCommandOptionType.Channel, "Delete reactions from this channel", isRequired: false)
-					.AddOption("user", ApplicationCommandOptionType.User, "Delete reactions from this user", isRequired: false)
+					.AddOption("user", ApplicationCommandOptionType.User, "Delete reactions from this user", isRequired: false),
+				new SlashCommandBuilder()
+					.WithName("version")
+					.WithDescription("Get the current version of the bot"),
 			};
 
 			try
@@ -212,6 +215,13 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 				break;
 			case "delete":
 				await HandleDeleteCommand(command);
+				break;
+			case "version":
+				await command.DeferAsync(ephemeral: true);
+				var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version.ToString();
+				await command.ModifyOriginalResponseAsync(x => x.Embed = SuccessEmbed(
+					$"Bot Version: `{version}`", 
+					"Version Information"));
 				break;
 		}
 	}
