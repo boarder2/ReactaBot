@@ -108,35 +108,101 @@ public class SchedulerService : IHostedService
 
 	private async Task ExecuteJob(ScheduledJob job)
 	{
-		var channel = _client.GetChannel(job.ChannelId) as ITextChannel;
-		if (channel == null)
+		if (job.IsForum)
 		{
-			throw new Exception($"Could not find channel");
-		}
-
-		var endDate = DateTimeOffset.UtcNow;
-		var startDate = endDate.Subtract(ParseInterval(job.Interval));
-
-		var messages = await _db.GetTopMessages(
-			startDate,
-			endDate,
-			job.Count,
-			job.GuildId);
-
-		if (messages.Any())
-		{
-			var header = $"**Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC**)";
-			var messageParts = await _reactionsService.FormatTopMessagesMultiPart(_client, messages, header);
-			foreach (var part in messageParts)
+			var forumChannel = _client.GetChannel(job.ChannelId) as IForumChannel;
+			if (forumChannel == null)
 			{
-				await channel.SendMessageAsync(part);
+				throw new Exception("Could not find forum channel");
 			}
-			_logger.LogInformation("Successfully executed job with {Count} message parts", messageParts.Count);
+
+			var endDate = DateTimeOffset.UtcNow;
+			var startDate = endDate.Subtract(ParseInterval(job.Interval));
+
+			var messages = await _db.GetTopMessages(
+				startDate,
+				endDate,
+				job.Count,
+				job.GuildId);
+
+			if (messages.Any())
+			{
+				var threadTitle = ProcessTitleTemplate(job.ThreadTitleTemplate, job.Count, job.Interval);
+				var header = $"**Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC**)";
+				var messageParts = await _reactionsService.FormatTopMessagesMultiPart(_client, messages, header);
+
+				var thread = await forumChannel.CreatePostAsync(
+					threadTitle,
+					text: messageParts.First()
+				);
+
+				// Post additional parts if any
+				for (int i = 1; i < messageParts.Count; i++)
+				{
+					await thread.SendMessageAsync(messageParts[i]);
+				}
+
+				_logger.LogInformation("Successfully created forum thread with {Count} message parts", messageParts.Count);
+			}
+			else
+			{
+				_logger.LogInformation("No messages found for forum job");
+			}
 		}
 		else
 		{
-			_logger.LogInformation("No messages found for job");
+			var channel = _client.GetChannel(job.ChannelId) as ITextChannel;
+			if (channel == null)
+			{
+				throw new Exception($"Could not find channel");
+			}
+
+			var endDate = DateTimeOffset.UtcNow;
+			var startDate = endDate.Subtract(ParseInterval(job.Interval));
+
+			var messages = await _db.GetTopMessages(
+				startDate,
+				endDate,
+				job.Count,
+				job.GuildId);
+
+			if (messages.Any())
+			{
+				var header = $"**Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC**)";
+				var messageParts = await _reactionsService.FormatTopMessagesMultiPart(_client, messages, header);
+				foreach (var part in messageParts)
+				{
+					await channel.SendMessageAsync(part);
+				}
+				_logger.LogInformation("Successfully executed job with {Count} message parts", messageParts.Count);
+			}
+			else
+			{
+				_logger.LogInformation("No messages found for job");
+			}
 		}
+	}
+
+	private string ProcessTitleTemplate(string template, int count, string interval)
+	{
+		var now = DateTime.UtcNow;
+		return System.Text.RegularExpressions.Regex.Replace(
+			template,
+			@"\{date(?::([^}]+))?\}",
+			match =>
+			{
+				var format = match.Groups[1].Success ? match.Groups[1].Value : "G";
+				try
+				{
+					return now.ToString(format);
+				}
+				catch (FormatException)
+				{
+					return now.ToString("G");
+				}
+			})
+			.Replace("{count}", count.ToString())
+			.Replace("{interval}", interval);
 	}
 
 	private TimeSpan ParseInterval(string interval)

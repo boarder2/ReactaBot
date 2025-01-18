@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 public class DbHelper
 {
-	private readonly long CurrentVersion = 0;
+	private readonly long CurrentVersion = 1; // Changed from 0 to 1
 	private bool _initialized;
 	private readonly string DbFile;
 	private readonly ILogger<DbHelper> _logger;
@@ -99,7 +99,9 @@ public class DbHelper
 							guild_id BIGINT NOT NULL,
 							count INTEGER NOT NULL,
 							next_run TIMESTAMP WITH TIME ZONE NOT NULL,
-							created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+							created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+							is_forum BOOLEAN DEFAULT FALSE,
+							thread_title_template TEXT
 						);
 						
 						CREATE INDEX scheduled_jobs_guild_id_channel_id ON scheduled_jobs(guild_id, channel_id);
@@ -133,6 +135,10 @@ public class DbHelper
 		switch (dbVersion)
 		{
 			case 1:
+				con.Execute(@"
+					ALTER TABLE scheduled_jobs ADD COLUMN is_forum BOOLEAN DEFAULT FALSE;
+					ALTER TABLE scheduled_jobs ADD COLUMN thread_title_template TEXT;
+				", transaction: tx);
 				break;
 		}
 	}
@@ -142,8 +148,30 @@ public class DbHelper
 		job.Id = Guid.NewGuid();
 		using var conn = GetConnection();
 		await conn.ExecuteAsync(@"
-				INSERT INTO scheduled_jobs (id, cron_expression, interval, channel_id, guild_id, count, next_run, created_at)
-				VALUES (LOWER(@Id), @CronExpression, @Interval, @ChannelId, @GuildId, @Count, @NextRun, @CreatedAt)",
+				INSERT INTO scheduled_jobs (
+					id, 
+					cron_expression, 
+					interval, 
+					channel_id, 
+					guild_id, 
+					count, 
+					next_run, 
+					created_at, 
+					is_forum, 
+					thread_title_template
+				)
+				VALUES (
+					LOWER(@Id), 
+					@CronExpression, 
+					@Interval, 
+					@ChannelId, 
+					@GuildId, 
+					@Count, 
+					@NextRun, 
+					@CreatedAt, 
+					@IsForum, 
+					@ThreadTitleTemplate
+				)",
 			job);
 		return job.Id;
 	}
@@ -160,7 +188,9 @@ public class DbHelper
 					 guild_id as GuildId,
 					 count as Count,
 					 next_run as NextRun,
-					 created_at as CreatedAt
+					 created_at as CreatedAt,
+					 is_forum as IsForum,
+					 thread_title_template as ThreadTitleTemplate
 				FROM scheduled_jobs 
 				WHERE datetime(next_run) <= datetime('now')")).ToList();
 	}
@@ -297,7 +327,9 @@ public class DbHelper
 					 guild_id as GuildId,
 					 count as Count,
 					 next_run as NextRun,
-					 created_at as CreatedAt
+					 created_at as CreatedAt,
+					 is_forum as IsForum,
+					 thread_title_template as ThreadTitleTemplate
 				FROM scheduled_jobs 
 				WHERE guild_id = @GuildId
 				ORDER BY next_run ASC",
@@ -319,7 +351,9 @@ public class DbHelper
 					 guild_id as GuildId,
 					 count as Count,
 					 next_run as NextRun,
-					 created_at as CreatedAt
+					 created_at as CreatedAt,
+					 is_forum as IsForum,
+					 thread_title_template as ThreadTitleTemplate
 				FROM scheduled_jobs 
 				WHERE id = @Id",
 			new { Id = guid.ToString().ToLowerInvariant() });

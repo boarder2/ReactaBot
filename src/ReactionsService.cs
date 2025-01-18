@@ -1,7 +1,7 @@
 using Dapper;
 using System.Text;
 
-public class ReactionsService(AppConfiguration _config, DbHelper _db, ILogger<ReactionsService> _logger)
+public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 {
 	private const string TOO_MANY_RESULTS = "\n**Too many results for one message!**";
 	private readonly int TOO_MANY_RESULTS_LENGTH = TOO_MANY_RESULTS.Length;

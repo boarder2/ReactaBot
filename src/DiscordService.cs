@@ -48,25 +48,52 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 				new SlashCommandBuilder()
 					.WithName("schedule")
 					.WithContextTypes(InteractionContextType.Guild)
-					.WithDescription("Schedule recurring top messages report")
-					.AddOption("cron", ApplicationCommandOptionType.String, "Cron expression for scheduling (e.g. '0 */4 * * *')", isRequired: true)
+					.WithDescription("Manage scheduled reports")
 					.AddOption(new SlashCommandOptionBuilder()
-						.WithName("interval")
-						.WithRequired(true)
-						.WithType(ApplicationCommandOptionType.String)
-						.WithDescription("Time interval to analyze")
-						.AddChoice("1h", "1h")
-						.AddChoice("4h", "4h")
-						.AddChoice("8h", "8h")
-						.AddChoice("12h", "12h")
-						.AddChoice("24h", "24h")
-						.AddChoice("2d", "2d")
-						.AddChoice("3d", "3d")
-						.AddChoice("5d", "5d")
-						.AddChoice("7d", "7d")
-					)
-					.AddOption("channel", ApplicationCommandOptionType.Channel, "Channel to post results", isRequired: true)
-					.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-20)", isRequired: true),
+						.WithName("channel")
+						.WithDescription("Schedule recurring top messages report for a channel")
+						.WithType(ApplicationCommandOptionType.SubCommand)
+						.AddOption("cron", ApplicationCommandOptionType.String, "Cron expression for scheduling (e.g. '0 */4 * * *')", isRequired: true)
+						.AddOption(new SlashCommandOptionBuilder()
+							.WithName("interval")
+							.WithRequired(true)
+							.WithType(ApplicationCommandOptionType.String)
+							.WithDescription("Time interval to analyze")
+							.AddChoice("1h", "1h")
+							.AddChoice("4h", "4h")
+							.AddChoice("8h", "8h")
+							.AddChoice("12h", "12h")
+							.AddChoice("24h", "24h")
+							.AddChoice("2d", "2d")
+							.AddChoice("3d", "3d")
+							.AddChoice("5d", "5d")
+							.AddChoice("7d", "7d")
+						)
+						.AddOption("channel", ApplicationCommandOptionType.Channel, "Channel to post results", isRequired: true, channelTypes: new List<ChannelType> { ChannelType.Text })
+						.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-20)", isRequired: true))
+					.AddOption(new SlashCommandOptionBuilder()
+						.WithName("forum")
+						.WithDescription("Schedule recurring top messages report in a forum")
+						.WithType(ApplicationCommandOptionType.SubCommand)
+						.AddOption("cron", ApplicationCommandOptionType.String, "Cron expression for scheduling (e.g. '0 */4 * * *')", isRequired: true)
+						.AddOption(new SlashCommandOptionBuilder()
+							.WithName("interval")
+							.WithRequired(true)
+							.WithType(ApplicationCommandOptionType.String)
+							.WithDescription("Time interval to analyze")
+							.AddChoice("1h", "1h")
+							.AddChoice("4h", "4h")
+							.AddChoice("8h", "8h")
+							.AddChoice("12h", "12h")
+							.AddChoice("24h", "24h")
+							.AddChoice("2d", "2d")
+							.AddChoice("3d", "3d")
+							.AddChoice("5d", "5d")
+							.AddChoice("7d", "7d")
+						)
+						.AddOption("forum", ApplicationCommandOptionType.Channel, "Forum channel to post results", isRequired: true, channelTypes: new List<ChannelType> { ChannelType.Forum })
+						.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-20)", isRequired: true)
+						.AddOption("title", ApplicationCommandOptionType.String, "Thread title template. Variables: {date:format}, {count}, {interval}. Date format is optional.", isRequired: true)),
 				new SlashCommandBuilder()
 					.WithName("getschedules")
 					.WithContextTypes(InteractionContextType.Guild)
@@ -166,7 +193,16 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 						.Build());
 				break;
 			case "schedule":
-				await HandleScheduleCommand(command);
+				var subCommand = command.Data.Options.First().Name;
+				switch (subCommand)
+				{
+					case "channel":
+						await HandleScheduleChannelCommand(command);
+						break;
+					case "forum":
+						await HandleScheduleForumCommand(command);
+						break;
+				}
 				break;
 			case "getschedules":
 				await HandleGetSchedulesCommand(command);
@@ -180,13 +216,14 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		}
 	}
 
-	private async Task HandleScheduleCommand(SocketSlashCommand command)
+	private async Task HandleScheduleChannelCommand(SocketSlashCommand command)
 	{
 		await command.DeferAsync(ephemeral: true);
-		var cronExpr = (string)command.Data.Options.First(x => x.Name == "cron").Value;
-		var interval = (string)command.Data.Options.First(x => x.Name == "interval").Value;
-		var channel = (ITextChannel)command.Data.Options.First(x => x.Name == "channel").Value;
-		var count = (long)command.Data.Options.First(x => x.Name == "count").Value;
+		var options = command.Data.Options.First().Options;
+		var cronExpr = (string)options.First(x => x.Name == "cron").Value;
+		var interval = (string)options.First(x => x.Name == "interval").Value;
+		var channel = (ITextChannel)options.First(x => x.Name == "channel").Value;
+		var count = (long)options.First(x => x.Name == "count").Value;
 
 		// Validate inputs
 		if (!IsValidInterval(interval))
@@ -234,6 +271,65 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		await command.ModifyOriginalResponseAsync(x => x.Embed = SuccessEmbed(
 			$"Scheduled job created. Will post top {count} messages for the last `{interval}` to {channel.Mention}\n" +
 			$"Schedule: `{cronExpr}`\nNext run: {nextRun.Value:yyyy-MM-dd HH:mm:ss} UTC"));
+	}
+
+	private async Task HandleScheduleForumCommand(SocketSlashCommand command)
+	{
+		await command.DeferAsync(ephemeral: true);
+		var options = command.Data.Options.First().Options;
+		var cronExpr = (string)options.First(x => x.Name == "cron").Value;
+		var interval = (string)options.First(x => x.Name == "interval").Value;
+		var forumChannel = (IForumChannel)options.First(x => x.Name == "forum").Value;
+		var count = (long)options.First(x => x.Name == "count").Value;
+		var titleTemplate = (string)options.First(x => x.Name == "title").Value;
+
+		if (!IsValidInterval(interval))
+		{
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid interval. Use: 1h,4h,8h,12h,24h,2d,3d,5d,7d"));
+			return;
+		}
+
+		try
+		{
+			CronExpression.Parse(cronExpr);
+		}
+		catch
+		{
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid cron expression"));
+			return;
+		}
+
+		if (count < 1 || count > 20)
+		{
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Count must be between 1 and 20"));
+			return;
+		}
+
+		var expression = CronExpression.Parse(cronExpr);
+		var nextRun = expression.GetNextOccurrence(DateTime.UtcNow);
+		if (!nextRun.HasValue)
+		{
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid cron expression - could not determine next run time"));
+			return;
+		}
+
+		var job = new ScheduledJob
+		{
+			CronExpression = cronExpr,
+			Interval = interval,
+			ChannelId = forumChannel.Id,
+			GuildId = forumChannel.GuildId,
+			Count = (int)count,
+			NextRun = nextRun.Value,
+			CreatedAt = DateTime.UtcNow,
+			IsForum = true,
+			ThreadTitleTemplate = titleTemplate
+		};
+
+		await _db.CreateScheduledJob(job);
+		await command.ModifyOriginalResponseAsync(x => x.Embed = SuccessEmbed(
+			$"Scheduled forum job created. Will post top {count} messages for the last `{interval}` to {forumChannel.Mention}\n" +
+			$"Schedule: `{cronExpr}`\nTitle Template: `{titleTemplate}`\nNext run: {nextRun.Value:yyyy-MM-dd HH:mm:ss} UTC"));
 	}
 
 	private async Task HandleGetSchedulesCommand(SocketSlashCommand command)
@@ -317,6 +413,10 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 			sb.AppendLine($"Schedule: `{job.CronExpression}`");
 			sb.AppendLine($"Interval: {job.Interval}");
 			sb.AppendLine($"Messages: {job.Count}");
+			if (job.IsForum && !string.IsNullOrEmpty(job.ThreadTitleTemplate))
+			{
+				sb.AppendLine($"Title Template: `{job.ThreadTitleTemplate}`");
+			}
 			sb.AppendLine($"Next Run: {job.NextRun:yyyy-MM-dd HH:mm:ss} UTC");
 			sb.AppendLine();
 		}

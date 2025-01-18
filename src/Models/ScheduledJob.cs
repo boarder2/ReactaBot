@@ -8,4 +8,6 @@ public class ScheduledJob
     public int Count { get; set; }
     public DateTime NextRun { get; set; }
     public DateTime CreatedAt { get; set; }
+    public bool IsForum { get; set; }
+    public string ThreadTitleTemplate { get; set; }
 }
