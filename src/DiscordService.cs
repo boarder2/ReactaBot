@@ -38,7 +38,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 					.AddOption("limit", ApplicationCommandOptionType.Integer, "Number of messages to show (1-10) - Defaults to 10", isRequired: false),
 				new SlashCommandBuilder()
 					.WithName("optout")
-					.WithDescription("Opt out of having reactions to your reactions tracked by the bot"),
+					.WithDescription("Opt out of having reactions to your messages tracked by the bot"),
 				new SlashCommandBuilder()
 					.WithName("optin")
 					.WithDescription("Opt back in to having reactions to your messages tracked by the bot"),

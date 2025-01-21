@@ -290,8 +290,8 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 		sb.AppendLine($"<@{authorId}>: `{preview}`");
 		sb.AppendLine(string.Join(" ", reactions.Select(r =>
 			r.Value.reactionId.HasValue ?
-			$"<:{r.Key}:{r.Value.reactionId}> {r.Value.count}" :
-			$"{r.Key} {r.Value.count}"
+			$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
+			$"{r.Key.Split(":")[0]} {r.Value.count}"
 		)));
 		sb.AppendLine();
 

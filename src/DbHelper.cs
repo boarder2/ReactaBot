@@ -247,7 +247,7 @@ public class DbHelper
 				.Where(x => !string.IsNullOrEmpty(x))
 				.Select(x => x.Split(':'))
 				.ToDictionary(
-					x => x[0],
+					x => x[0] + ":" + (!string.IsNullOrEmpty(x[2]) ? x[2] : ""),
 					x => (count: int.Parse(x[1]), reactionId: !string.IsNullOrEmpty(x[2]) ? (ulong?)ulong.Parse(x[2]) : null)
 				) ?? new Dictionary<string, (int count, ulong? reactionId)>()
 		)).ToList();
