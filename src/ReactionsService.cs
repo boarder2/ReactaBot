@@ -118,6 +118,12 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 				return;
 			}
 
+			if (limitOption != null)
+			{
+				var longLimit = (long)limitOption.Value;
+				limit = (int)Math.Clamp(longLimit, 1, 10);
+			}
+
 			if (userOption != null)
 			{
 				userId = ((IUser)userOption.Value).Id;
@@ -152,10 +158,11 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 		foreach (var msg in messages)
 		{
 			var dMessage = await client.GetMessageFromUrl(msg.url, _logger);
+			var username = (dMessage.Author as IGuildUser)?.DisplayName ?? dMessage.Author.Username;
 			var embed = new EmbedBuilder()
 				.WithColor(rank == 1 ? Color.Gold : Color.Blue)
 				.WithTitle($"#{rank++} in <#{dMessage.Channel.Id}>")
-				.WithAuthor(dMessage.Author)
+				// .WithAuthor(username, dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
 				.WithDescription(string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content)
 				.WithFields(
 					new EmbedFieldBuilder()
@@ -165,8 +172,13 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 							$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
 							$"{r.Key.Split(":")[0]} {r.Value.count}"
 						)))
+						.WithIsInline(false),
+					new EmbedFieldBuilder()
+						.WithName("Author")
+						.WithValue($"<@{msg.authorId}>")
+						.WithIsInline(false)
 				)
-				.WithFooter($"Total reactions: {msg.total}")
+				.WithFooter($"Total reactions: {msg.total}", dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
 				.WithTimestamp(dMessage.Timestamp)
 				.WithUrl(msg.url);
 
