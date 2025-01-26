@@ -166,6 +166,7 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 							$"{r.Key.Split(":")[0]} {r.Value.count}"
 						)))
 				)
+				.WithFooter($"Total reactions: {msg.total}")
 				.WithTimestamp(dMessage.Timestamp)
 				.WithUrl(msg.url);
 
