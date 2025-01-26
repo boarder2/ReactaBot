@@ -128,21 +128,21 @@ public class SchedulerService : IHostedService
 			if (messages.Any())
 			{
 				var threadTitle = ProcessTitleTemplate(job.ThreadTitleTemplate, job.Count, job.Interval);
-				var header = $"**Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC**)";
-				var messageParts = await _reactionsService.FormatTopMessagesMultiPart(_client, messages, header);
+				var header = $"Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
+				var embedGroups = await _reactionsService.FormatTopMessagesAsEmbeds(_client, messages);
 
 				var thread = await forumChannel.CreatePostAsync(
 					threadTitle,
-					text: messageParts.First()
+					text: header
 				);
 
-				// Post additional parts if any
-				for (int i = 1; i < messageParts.Count; i++)
+				// Post additional parts
+				foreach (var embedGroup in embedGroups)
 				{
-					await thread.SendMessageAsync(messageParts[i]);
+					await thread.SendMessageAsync(embeds: embedGroup.ToArray());
 				}
 
-				_logger.LogInformation("Successfully created forum thread with {Count} message parts", messageParts.Count);
+				_logger.LogInformation("Successfully created forum thread with {Count} embed groups", embedGroups.Count);
 			}
 			else
 			{
@@ -168,13 +168,17 @@ public class SchedulerService : IHostedService
 
 			if (messages.Any())
 			{
-				var header = $"**Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC**)";
-				var messageParts = await _reactionsService.FormatTopMessagesMultiPart(_client, messages, header);
-				foreach (var part in messageParts)
+				var header = $"Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
+				var embedGroups = await _reactionsService.FormatTopMessagesAsEmbeds(_client, messages);
+				
+				await channel.SendMessageAsync(text: header);
+
+				// Send all parts
+				foreach (var embedGroup in embedGroups)
 				{
-					await channel.SendMessageAsync(part);
+					await channel.SendMessageAsync(embeds: embedGroup.ToArray());
 				}
-				_logger.LogInformation("Successfully executed job with {Count} message parts", messageParts.Count);
+				_logger.LogInformation("Successfully executed job with {Count} embed groups", embedGroups.Count);
 			}
 			else
 			{

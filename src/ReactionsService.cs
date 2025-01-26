@@ -3,8 +3,8 @@ using System.Text;
 
 public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 {
-	private const string TOO_MANY_RESULTS = "\n**Too many results for one message!**";
-	private readonly int TOO_MANY_RESULTS_LENGTH = TOO_MANY_RESULTS.Length;
+	private const string REACTION_SEPARATOR = " "; // U+2003 EM SPACE (It's bigger than a regular space)
+
 	public async Task UpdateMessageReactions(IMessage msg)
 	{
 		if (await _db.IsUserOptedOut(msg.Author.Id))
@@ -118,18 +118,6 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 				return;
 			}
 
-			if (limitOption != null)
-			{
-				var longLimit = (long)limitOption.Value;
-				limit = (int)Math.Clamp(longLimit, 1, 50);
-				if (longLimit != limit)
-				{
-					await command.ModifyOriginalResponseAsync(msg =>
-						msg.Content = "Number must be between 1 and 50");
-					return;
-				}
-			}
-
 			if (userOption != null)
 			{
 				userId = ((IUser)userOption.Value).Id;
@@ -143,10 +131,10 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 				return;
 			}
 
-			var response = await FormatTopMessages(client, topMessages);
+			var response = await FormatTopMessagesAsEmbeds(client, topMessages);
 			await command.ModifyOriginalResponseAsync(msg =>
 			{
-				msg.Content = $"**Top {limit} messages for {date:MMMM d, yyyy}**\n" + response;
+				msg.Embeds = response.First().ToArray();
 			});
 		}
 		catch (Exception ex)
@@ -155,146 +143,46 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 		}
 	}
 
-	public async Task<string> FormatTopMessages(DiscordSocketClient client,
-		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages)
+	public async Task<List<List<Embed>>> FormatTopMessagesAsEmbeds(DiscordSocketClient client, List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages)
 	{
-		const int maxPreviewLength = 100;
-		const int minPreviewLength = 15;
-		const int previewDecrement = 20;
-
-		// Get all previews once
-		var previewCache = new Dictionary<string, string>();
-		foreach (var (url, _, _, _) in messages)
-		{
-			var preview = await client.GetMessagePreview(url, _logger, maxPreviewLength);
-			previewCache[url] = preview;
-		}
-
-		// Try different preview lengths without additional API calls
-		for (int previewLength = maxPreviewLength; previewLength >= minPreviewLength; previewLength -= previewDecrement)
-		{
-			var result = TryFormatMessagesWithCache(messages, previewCache, previewLength);
-			if (result != null)
-			{
-				return result;
-			}
-		}
-
-		// Final attempt with minimum length + TOO_MANY_RESULTS if needed
-		return TryFormatMessagesWithCache(messages, previewCache, minPreviewLength, true) ?? "";
-	}
-
-	public async Task<List<string>> FormatTopMessagesMultiPart(
-		DiscordSocketClient client,
-		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages,
-		string header)
-	{
-		const int maxPreviewLength = 100;
-		var result = new List<string>();
-		var currentPart = new StringBuilder();
-		var rank = 1;
-		var partNumber = 1;
-
-		// Get all previews once
-		var previewCache = new Dictionary<string, string>();
-		foreach (var (url, _, _, _) in messages)
-		{
-			var preview = await client.GetMessagePreview(url, _logger, maxPreviewLength);
-			previewCache[url] = preview;
-		}
-
-		// Start first part with header
-		currentPart.AppendLine($"{header} (Part 1/?)");
-
-		foreach (var message in messages)
-		{
-			var messageText = FormatSingleMessageWithCache(message, previewCache, rank, maxPreviewLength);
-			
-			if (currentPart.Length + messageText.Length < 2000)
-			{
-				currentPart.Append(messageText);
-			}
-			else
-			{
-				result.Add(currentPart.ToString());
-				currentPart.Clear();
-				partNumber++;
-				currentPart.AppendLine($"{header} (Part {partNumber}/?)");
-				currentPart.Append(messageText);
-			}
-			rank++;
-		}
-
-		if (currentPart.Length > 0)
-		{
-			result.Add(currentPart.ToString());
-		}
-
-		// Update headers with correct total part count
-		for (int i = 0; i < result.Count; i++)
-		{
-			result[i] = result[i].Replace("/?)", $"/{result.Count})");
-		}
-
-		return result;
-	}
-
-	private string? TryFormatMessagesWithCache(
-		List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)> messages,
-		Dictionary<string, string> previewCache,
-		int previewLength,
-		bool isLastAttempt = false)
-	{
-		var sb = new StringBuilder();
+		var embedGroups = new List<List<Embed>>();
+		var currentGroup = new List<Embed>();
 		var rank = 1;
 
-		foreach (var message in messages)
+		foreach (var msg in messages)
 		{
-			var messageText = FormatSingleMessageWithCache(message, previewCache, rank, previewLength);
-			
-			if (sb.Length + messageText.Length < (2000 - TOO_MANY_RESULTS_LENGTH))
+			var dMessage = await client.GetMessageFromUrl(msg.url, _logger);
+			var embed = new EmbedBuilder()
+				.WithColor(rank == 1 ? Color.Gold : Color.Blue)
+				.WithTitle($"#{rank++} in <#{dMessage.Channel.Id}>")
+				.WithAuthor(dMessage.Author)
+				.WithDescription(string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content)
+				.WithFields(
+					new EmbedFieldBuilder()
+						.WithName("Reactions")
+						.WithValue(string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
+							r.Value.reactionId.HasValue ?
+							$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
+							$"{r.Key.Split(":")[0]} {r.Value.count}"
+						)))
+				)
+				.WithTimestamp(dMessage.Timestamp)
+				.WithUrl(msg.url);
+
+			if (currentGroup.Count >= 10)
 			{
-				sb.Append(messageText);
-				rank++;
+				embedGroups.Add(currentGroup);
+				currentGroup = new List<Embed>();
 			}
-			else
-			{
-				if (isLastAttempt)
-				{
-					sb.Append(TOO_MANY_RESULTS);
-					return sb.ToString();
-				}
-				return null;
-			}
+
+			currentGroup.Add(embed.Build());
 		}
 
-		return sb.ToString();
-	}
-
-	private string FormatSingleMessageWithCache(
-		(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions) message,
-		Dictionary<string, string> previewCache,
-		int rank,
-		int previewLength)
-	{
-		var (url, authorId, _, reactions) = message;
-		var sb = new StringBuilder();
-		
-		var preview = previewCache[url];
-		if (preview.Length > previewLength)
+		if (currentGroup.Any())
 		{
-			preview = preview[..previewLength] + "...";
+			embedGroups.Add(currentGroup);
 		}
-		
-		sb.AppendLine($"#{rank}. {url}");
-		sb.AppendLine($"<@{authorId}>: `{preview}`");
-		sb.AppendLine(string.Join(" ", reactions.Select(r =>
-			r.Value.reactionId.HasValue ?
-			$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
-			$"{r.Key.Split(":")[0]} {r.Value.count}"
-		)));
-		sb.AppendLine();
 
-		return sb.ToString();
+		return embedGroups;
 	}
 }
