@@ -2,7 +2,7 @@ public class ScheduledJob
 {
     public Guid Id { get; set; }
     public string CronExpression { get; set; }
-    public string Interval { get; set; }
+    public double IntervalHours { get; set; } // Changed from string Interval
     public ulong ChannelId { get; set; }
     public ulong GuildId { get; set; }
     public int Count { get; set; }

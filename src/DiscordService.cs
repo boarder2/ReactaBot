@@ -5,6 +5,9 @@ namespace reactabot;
 
 public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService> _logger, AppConfiguration _config, DbHelper _db, ReactionsService _reactionService) : IHostedService
 {
+	private const double MIN_INTERVAL_HOURS = 0.5;
+	private const double MAX_INTERVAL_HOURS = 168; // 7 days
+
 	public async Task StartAsync(CancellationToken cancellationToken)
 	{
 
@@ -57,18 +60,10 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 						.AddOption(new SlashCommandOptionBuilder()
 							.WithName("interval")
 							.WithRequired(true)
-							.WithType(ApplicationCommandOptionType.String)
-							.WithDescription("Time interval to analyze")
-							.AddChoice("1h", "1h")
-							.AddChoice("4h", "4h")
-							.AddChoice("8h", "8h")
-							.AddChoice("12h", "12h")
-							.AddChoice("24h", "24h")
-							.AddChoice("2d", "2d")
-							.AddChoice("3d", "3d")
-							.AddChoice("5d", "5d")
-							.AddChoice("7d", "7d")
-						)
+							.WithType(ApplicationCommandOptionType.Number)
+							.WithDescription($"Time interval to analyze in hours ({MIN_INTERVAL_HOURS}-{MAX_INTERVAL_HOURS})")
+							.WithMinValue((double)MIN_INTERVAL_HOURS)
+							.WithMaxValue((double)MAX_INTERVAL_HOURS))
 						.AddOption("channel", ApplicationCommandOptionType.Channel, "Channel to post results", isRequired: true, channelTypes: new List<ChannelType> { ChannelType.Text })
 						.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-20)", isRequired: true))
 					.AddOption(new SlashCommandOptionBuilder()
@@ -79,18 +74,10 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 						.AddOption(new SlashCommandOptionBuilder()
 							.WithName("interval")
 							.WithRequired(true)
-							.WithType(ApplicationCommandOptionType.String)
-							.WithDescription("Time interval to analyze")
-							.AddChoice("1h", "1h")
-							.AddChoice("4h", "4h")
-							.AddChoice("8h", "8h")
-							.AddChoice("12h", "12h")
-							.AddChoice("24h", "24h")
-							.AddChoice("2d", "2d")
-							.AddChoice("3d", "3d")
-							.AddChoice("5d", "5d")
-							.AddChoice("7d", "7d")
-						)
+							.WithType(ApplicationCommandOptionType.Number)
+							.WithDescription($"Time interval to analyze in hours ({MIN_INTERVAL_HOURS}-{MAX_INTERVAL_HOURS})")
+							.WithMinValue((double)MIN_INTERVAL_HOURS)
+							.WithMaxValue((double)MAX_INTERVAL_HOURS))
 						.AddOption("forum", ApplicationCommandOptionType.Channel, "Forum channel to post results", isRequired: true, channelTypes: new List<ChannelType> { ChannelType.Forum })
 						.AddOption("count", ApplicationCommandOptionType.Integer, "Number of messages to show (1-20)", isRequired: true)
 						.AddOption("title", ApplicationCommandOptionType.String, "Thread title template. Variables: {date:format}, {count}, {interval}. Date format is optional.", isRequired: true)),
@@ -231,14 +218,14 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		await command.DeferAsync(ephemeral: true);
 		var options = command.Data.Options.First().Options;
 		var cronExpr = (string)options.First(x => x.Name == "cron").Value;
-		var interval = (string)options.First(x => x.Name == "interval").Value;
+		var interval = (double)options.First(x => x.Name == "interval").Value;
 		var channel = (ITextChannel)options.First(x => x.Name == "channel").Value;
 		var count = (long)options.First(x => x.Name == "count").Value;
 
 		// Validate inputs
 		if (!IsValidInterval(interval))
 		{
-			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid interval. Use: 1h,4h,8h,12h,24h,2d,3d,5d,7d"));
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed($"Invalid interval. Must be between {MIN_INTERVAL_HOURS} and {MAX_INTERVAL_HOURS} hours."));
 			return;
 		}
 
@@ -269,7 +256,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		var job = new ScheduledJob
 		{
 			CronExpression = cronExpr,
-			Interval = interval,
+			IntervalHours = interval,
 			ChannelId = channel.Id,
 			GuildId = channel.GuildId,
 			Count = (int)count,
@@ -288,14 +275,14 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		await command.DeferAsync(ephemeral: true);
 		var options = command.Data.Options.First().Options;
 		var cronExpr = (string)options.First(x => x.Name == "cron").Value;
-		var interval = (string)options.First(x => x.Name == "interval").Value;
+		var interval = (double)options.First(x => x.Name == "interval").Value;
 		var forumChannel = (IForumChannel)options.First(x => x.Name == "forum").Value;
 		var count = (long)options.First(x => x.Name == "count").Value;
 		var titleTemplate = (string)options.First(x => x.Name == "title").Value;
 
 		if (!IsValidInterval(interval))
 		{
-			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed("Invalid interval. Use: 1h,4h,8h,12h,24h,2d,3d,5d,7d"));
+			await command.ModifyOriginalResponseAsync(x => x.Embed = ErrorEmbed($"Invalid interval. Must be between {MIN_INTERVAL_HOURS} and {MAX_INTERVAL_HOURS} hours."));
 			return;
 		}
 
@@ -326,7 +313,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		var job = new ScheduledJob
 		{
 			CronExpression = cronExpr,
-			Interval = interval,
+				IntervalHours = interval,
 			ChannelId = forumChannel.Id,
 			GuildId = forumChannel.GuildId,
 			Count = (int)count,
@@ -338,7 +325,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 
 		await _db.CreateScheduledJob(job);
 		await command.ModifyOriginalResponseAsync(x => x.Embed = SuccessEmbed(
-			$"Scheduled forum job created. Will post top {count} messages for the last `{interval}` to {forumChannel.Mention}\n" +
+			$"Scheduled forum job created. Will post top {count} messages for the last `{interval:0.#}h` to {forumChannel.Mention}\n" +
 			$"Schedule: `{cronExpr}`\nTitle Template: `{titleTemplate}`\nNext run: {nextRun.Value:yyyy-MM-dd HH:mm:ss} UTC"));
 	}
 
@@ -421,7 +408,7 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 			sb.AppendLine($"**ID: `{job.Id}`**");
 			sb.AppendLine($"Channel: <#{job.ChannelId}>");
 			sb.AppendLine($"Schedule: `{job.CronExpression}`");
-			sb.AppendLine($"Interval: {job.Interval}");
+			sb.AppendLine($"Interval: {job.IntervalHours:0.#}h");
 			sb.AppendLine($"Messages: {job.Count}");
 			if (job.IsForum && !string.IsNullOrEmpty(job.ThreadTitleTemplate))
 			{
@@ -433,10 +420,9 @@ public class DiscordService(DiscordSocketClient _client, ILogger<DiscordService>
 		return sb.ToString();
 	}
 
-	private bool IsValidInterval(string interval)
-	{
-		return new[] { "1h", "4h", "8h", "12h", "24h", "2d", "3d", "5d", "7d" }.Contains(interval);
-	}
+	private bool IsValidInterval(double hours) => 
+		hours >= MIN_INTERVAL_HOURS && hours <= MAX_INTERVAL_HOURS;
+
 
 	private Embed ErrorEmbed(string message, string title = "Error")
 	{

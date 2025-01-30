@@ -75,7 +75,7 @@ public class SchedulerService : IHostedService
 					{ "GuildId", job.GuildId },
 					{ "ChannelId", job.ChannelId },
 					{ "CronExpression", job.CronExpression },
-					{ "Interval", job.Interval },
+					{ "IntervalHours", job.IntervalHours },
 					{ "Count", job.Count }
 				});
 
@@ -117,7 +117,7 @@ public class SchedulerService : IHostedService
 			}
 
 			var endDate = DateTimeOffset.UtcNow;
-			var startDate = endDate.Subtract(ParseInterval(job.Interval));
+			var startDate = endDate.Subtract(TimeSpan.FromHours(job.IntervalHours));
 
 			var messages = await _db.GetTopMessages(
 				startDate,
@@ -127,8 +127,8 @@ public class SchedulerService : IHostedService
 
 			if (messages.Any())
 			{
-				var threadTitle = ProcessTitleTemplate(job.ThreadTitleTemplate, job.Count, job.Interval);
-				var header = $"Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
+				var threadTitle = ProcessTitleTemplate(job.ThreadTitleTemplate, job.Count, job.IntervalHours);
+				var header = $"Top {job.Count} messages for the last {job.IntervalHours:0.#}h (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
 				var embedGroups = await _reactionsService.FormatTopMessagesAsEmbeds(_client, messages);
 
 				var thread = await forumChannel.CreatePostAsync(
@@ -158,7 +158,7 @@ public class SchedulerService : IHostedService
 			}
 
 			var endDate = DateTimeOffset.UtcNow;
-			var startDate = endDate.Subtract(ParseInterval(job.Interval));
+			var startDate = endDate.Subtract(TimeSpan.FromHours(job.IntervalHours));
 
 			var messages = await _db.GetTopMessages(
 				startDate,
@@ -168,7 +168,7 @@ public class SchedulerService : IHostedService
 
 			if (messages.Any())
 			{
-				var header = $"Top {job.Count} messages for the last {job.Interval} (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
+				var header = $"Top {job.Count} messages for the last {job.IntervalHours:0.#}h (from {startDate:MMM dd HH:mm} to {endDate:MMM dd HH:mm} UTC)";
 				var embedGroups = await _reactionsService.FormatTopMessagesAsEmbeds(_client, messages);
 				
 				await channel.SendMessageAsync(text: header);
@@ -187,10 +187,10 @@ public class SchedulerService : IHostedService
 		}
 	}
 
-	private string ProcessTitleTemplate(string template, int count, string interval)
+	private string ProcessTitleTemplate(string template, int count, double intervalHours)
 	{
 		var now = DateTime.UtcNow;
-		return System.Text.RegularExpressions.Regex.Replace(
+		var result = System.Text.RegularExpressions.Regex.Replace(
 			template,
 			@"\{date(?::([^}]+))?\}",
 			match =>
@@ -204,25 +204,9 @@ public class SchedulerService : IHostedService
 				{
 					return now.ToString("G");
 				}
-			})
-			.Replace("{count}", count.ToString())
-			.Replace("{interval}", interval);
-	}
-
-	private TimeSpan ParseInterval(string interval)
-	{
-		return interval switch
-		{
-			"1h" => TimeSpan.FromHours(1),
-			"4h" => TimeSpan.FromHours(4),
-			"8h" => TimeSpan.FromHours(8),
-			"12h" => TimeSpan.FromHours(12),
-			"24h" => TimeSpan.FromDays(1),
-			"2d" => TimeSpan.FromDays(2),
-			"3d" => TimeSpan.FromDays(3),
-			"5d" => TimeSpan.FromDays(5),
-			"7d" => TimeSpan.FromDays(7),
-			_ => TimeSpan.FromDays(1)
-		};
+			});
+		result = result.Replace("{count}", count.ToString())
+			.Replace("{interval}", $"{intervalHours:0.#}h");
+		return result;
 	}
 }

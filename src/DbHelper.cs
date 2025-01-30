@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 public class DbHelper
 {
-	private readonly long CurrentVersion = 1; // Changed from 0 to 1
+	private readonly long CurrentVersion = 2; // Increment version number
 	private bool _initialized;
 	private readonly string DbFile;
 	private readonly ILogger<DbHelper> _logger;
@@ -94,7 +94,7 @@ public class DbHelper
 						CREATE TABLE scheduled_jobs (
 							id TEXT PRIMARY KEY,
 							cron_expression TEXT NOT NULL,
-							interval TEXT NOT NULL,
+							interval_hours REAL NOT NULL,
 							channel_id BIGINT NOT NULL,
 							guild_id BIGINT NOT NULL,
 							count INTEGER NOT NULL,
@@ -140,6 +140,30 @@ public class DbHelper
 					ALTER TABLE scheduled_jobs ADD COLUMN thread_title_template TEXT;
 				", transaction: tx);
 				break;
+			case 2:
+				con.Execute(@"
+					-- Add new column
+					ALTER TABLE scheduled_jobs ADD COLUMN interval_hours REAL;
+					
+					-- Convert existing intervals to hours
+					UPDATE scheduled_jobs 
+					SET interval_hours = CASE interval
+						WHEN '1h' THEN 1
+						WHEN '4h' THEN 4
+						WHEN '8h' THEN 8
+						WHEN '12h' THEN 12
+						WHEN '24h' THEN 24
+						WHEN '2d' THEN 48
+						WHEN '3d' THEN 72
+						WHEN '5d' THEN 120
+						WHEN '7d' THEN 168
+						ELSE 24
+					END;
+					
+					-- Drop old column (supported in SQLite 3.35.0+)
+					ALTER TABLE scheduled_jobs DROP COLUMN interval;
+				", transaction: tx);
+				break;
 		}
 	}
 
@@ -151,7 +175,7 @@ public class DbHelper
 				INSERT INTO scheduled_jobs (
 					id, 
 					cron_expression, 
-					interval, 
+					interval_hours, 
 					channel_id, 
 					guild_id, 
 					count, 
@@ -163,7 +187,7 @@ public class DbHelper
 				VALUES (
 					LOWER(@Id), 
 					@CronExpression, 
-					@Interval, 
+					@IntervalHours, 
 					@ChannelId, 
 					@GuildId, 
 					@Count, 
@@ -183,7 +207,7 @@ public class DbHelper
 				SELECT 
 					 CAST(id as TEXT) as Id,
 					 cron_expression as CronExpression,
-					 interval as Interval,
+					 interval_hours as IntervalHours,
 					 channel_id as ChannelId,
 					 guild_id as GuildId,
 					 count as Count,
@@ -322,7 +346,7 @@ public class DbHelper
 				SELECT 
 					 CAST(id as TEXT) as Id,
 					 cron_expression as CronExpression,
-					 interval as Interval,
+					 interval_hours as IntervalHours,
 					 channel_id as ChannelId,
 					 guild_id as GuildId,
 					 count as Count,
@@ -346,7 +370,7 @@ public class DbHelper
 				SELECT 
 					 CAST(id as TEXT) as Id,
 					 cron_expression as CronExpression,
-					 interval as Interval,
+					 interval_hours as IntervalHours,
 					 channel_id as ChannelId,
 					 guild_id as GuildId,
 					 count as Count,

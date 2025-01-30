@@ -5,3 +5,4 @@ Use primary constructors when possible
 Use dependency injection for services
 Use sqlite for data storage
 Use tabs for indentation
+Avoid duplicating code. If you find yourself copying and pasting code, consider refactoring it into a shared method or class.
