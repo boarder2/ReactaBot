@@ -163,7 +163,7 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 				.WithColor(rank == 1 ? Color.Gold : Color.Blue)
 				.WithTitle($"#{rank++} in <#{dMessage.Channel.Id}>")
 				// .WithAuthor(username, dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
-				.WithDescription(string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content)
+				.WithDescription(string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content.Length > 250 ? dMessage.Content.Substring(0, 250) + "..." : dMessage.Content)
 				.WithFields(
 					new EmbedFieldBuilder()
 						.WithName("Reactions")
@@ -182,7 +182,8 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 				.WithTimestamp(dMessage.Timestamp)
 				.WithUrl(msg.url);
 
-			if (currentGroup.Count >= 10)
+			// If the current group is full or the new embed would exceed the 6k character limit (we'll do it a little under 6k just to be safe), add the current group to the list and start a new group
+			if (currentGroup.Count >= 10 || currentGroup.Sum(e => e.Length) + embed.Length > 5700)
 			{
 				embedGroups.Add(currentGroup);
 				currentGroup = new List<Embed>();
