@@ -3,6 +3,7 @@ global using Discord.WebSocket;
 global using Microsoft.Extensions.Configuration;
 global using Microsoft.Extensions.Hosting;
 global using Microsoft.Extensions.Logging;
+global using reactabot.Common;
 global using Serilog.Context;
 global using Serilog.Core.Enrichers;
 global using System;

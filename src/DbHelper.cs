@@ -260,7 +260,7 @@ public class DbHelper
 
 		var results = await connection.QueryAsync<(string url, ulong authorId, int total, string reactions)>(
 			sql,
-			new { StartDate = startDate, EndDate = endDate, Limit = limit, GuildId = guildId, UserId = userId }
+			new { StartDate = startDate, EndDate = endDate, Limit = limit, GuildId = guildId, UserId = userId, ChannelId = channelId }
 		);
 
 		return results.Select(r => (

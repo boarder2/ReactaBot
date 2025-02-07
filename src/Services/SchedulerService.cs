@@ -1,4 +1,3 @@
-using System.Net.Mime;
 using Cronos;
 
 public class SchedulerService : IHostedService

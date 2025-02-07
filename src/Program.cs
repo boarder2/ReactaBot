@@ -4,6 +4,7 @@ using Serilog;
 using Serilog.Formatting.Compact;
 using reactabot;
 using reactabot.Health;
+using Discord.Interactions;
 
 Log.Logger = new LoggerConfiguration()
 					.Enrich.FromLogContext()
@@ -36,12 +37,17 @@ builder.Services.AddHostedService(provider => provider.GetRequiredService<Discor
 builder.Logging.ClearProviders();
 builder.Services.AddSerilog();
 
-// builder.Services.AddSingleton<AuthService>();
 builder.Services
 	.AddSingleton<AppConfiguration>()
 	.AddSingleton<DbHelper>()
-	.AddScoped<ReactionsService>()
+	.AddSingleton<ReactionsService>() 
 	.AddSingleton<IHealthCheckPublisher, Publisher>()
+	.AddSingleton(x => new InteractionService(x.GetRequiredService<DiscordSocketClient>()))
+	// Register interaction modules
+	.AddSingleton<OptCommand>()
+	.AddSingleton<ScheduleCommands>()
+	.AddSingleton<AdminCommands>()
+	.AddSingleton<TopCommands>()
 	.AddHostedService<SchedulerService>()
 	.AddHealthChecks()
 	.AddCheck<DiscordHealth>("Discord Health");

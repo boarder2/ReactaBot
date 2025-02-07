@@ -1,5 +1,4 @@
 using Dapper;
-using System.Text;
 
 public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 {
