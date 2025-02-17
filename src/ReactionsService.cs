@@ -161,24 +161,25 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 			var embed = new EmbedBuilder()
 				.WithColor(rank == 1 ? Color.Gold : Color.Blue)
 				.WithTitle($"#{rank++} in <#{dMessage.Channel.Id}>")
-				// .WithAuthor(username, dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
-				.WithDescription(string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content.Length > 250 ? dMessage.Content.Substring(0, 250) + "..." : dMessage.Content)
-				.WithFields(
-					new EmbedFieldBuilder()
-						.WithName("Reactions")
-						.WithValue(string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
+				.WithAuthor(username, dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl(), dMessage.GetJumpUrl())
+				.WithDescription((string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content.Length > 250 ? dMessage.Content.Substring(0, 250) + "..." : dMessage.Content) + 
+							"\n\n" + string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
 							r.Value.reactionId.HasValue ?
 							$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
 							$"{r.Key.Split(":")[0]} {r.Value.count}"
 						)))
-						.WithIsInline(false),
-					new EmbedFieldBuilder()
-						.WithName("Author")
-						.WithValue($"<@{msg.authorId}>")
-						.WithIsInline(false)
-				)
-				.WithFooter($"Total reactions: {msg.total}", dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
-				.WithTimestamp(dMessage.Timestamp)
+				// .WithFields(
+				// 	new EmbedFieldBuilder()
+				// 		.WithName("Reactions")
+				// 		.WithValue(string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
+				// 			r.Value.reactionId.HasValue ?
+				// 			$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
+				// 			$"{r.Key.Split(":")[0]} {r.Value.count}"
+				// 		)))
+				// 		.WithIsInline(false)
+				// )
+				//.WithFooter($"@{username}", dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
+				//.WithTimestamp(dMessage.Timestamp)
 				.WithUrl(msg.url);
 
 			// If the current group is full or the new embed would exceed the 6k character limit (we'll do it a little under 6k just to be safe), add the current group to the list and start a new group
