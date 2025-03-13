@@ -5,7 +5,7 @@ using System.Runtime.CompilerServices;
 
 public class DbHelper
 {
-	private readonly long CurrentVersion = 2; // Increment version number
+	private readonly long CurrentVersion = 4; // Increment version number
 	private bool _initialized;
 	private readonly string DbFile;
 	private readonly ILogger<DbHelper> _logger;
@@ -70,11 +70,13 @@ public class DbHelper
 							author INTEGER NOT NULL,
 							url VARCHAR(300) NOT NULL,
 							timestamp INTEGER NOT NULL DEFAULT(datetime('now')),
-							total_reactions BIGINT NOT NULL DEFAULT 0
+							total_reactions BIGINT NOT NULL DEFAULT 0,
+							parent_channel_id BIGINT NULL
 						);
 						CREATE INDEX messages_guild_id_author ON messages(guild_id, author);
 						CREATE INDEX messages_guild_id_timestamp_total_reactions ON messages(guild_id, timestamp, total_reactions);
 						CREATE INDEX messages_guild_id_channel_id ON messages(guild_id, channel_id);
+						CREATE INDEX messages_guild_id_parent_channel_id ON messages(guild_id, parent_channel_id);
 
 						CREATE TABLE reactions
 						(
@@ -104,9 +106,18 @@ public class DbHelper
 							thread_title_template TEXT
 						);
 						
+						CREATE TABLE schedule_channels (
+							schedule_id TEXT NOT NULL,
+							channel_id BIGINT NOT NULL,
+							is_excluded BOOLEAN NOT NULL DEFAULT FALSE,
+							FOREIGN KEY(schedule_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE,
+							PRIMARY KEY(schedule_id, channel_id)
+						);
+						
 						CREATE INDEX scheduled_jobs_guild_id_channel_id ON scheduled_jobs(guild_id, channel_id);
 						CREATE INDEX scheduled_jobs_next_run ON scheduled_jobs(next_run);
 						CREATE INDEX scheduled_jobs_id ON scheduled_jobs(id);
+						CREATE INDEX schedule_channels_schedule_id ON schedule_channels(schedule_id);
 
 						PRAGMA user_version=" + CurrentVersion + ";", transaction: tx);
 		tx.Commit();
@@ -162,6 +173,24 @@ public class DbHelper
 					
 					-- Drop old column (supported in SQLite 3.35.0+)
 					ALTER TABLE scheduled_jobs DROP COLUMN interval;
+				", transaction: tx);
+				break;
+			case 3:
+				con.Execute(@"
+					ALTER TABLE messages ADD COLUMN parent_channel_id BIGINT NULL;
+					CREATE INDEX messages_guild_id_parent_channel_id ON messages(guild_id, parent_channel_id);
+				", transaction: tx);
+				break;
+			case 4:
+				con.Execute(@"
+					CREATE TABLE schedule_channels (
+						schedule_id TEXT NOT NULL,
+						channel_id BIGINT NOT NULL,
+						is_excluded BOOLEAN NOT NULL DEFAULT FALSE,
+						FOREIGN KEY(schedule_id) REFERENCES scheduled_jobs(id) ON DELETE CASCADE,
+						PRIMARY KEY(schedule_id, channel_id)
+					);
+					CREATE INDEX schedule_channels_schedule_id ON schedule_channels(schedule_id);
 				", transaction: tx);
 				break;
 		}
@@ -228,7 +257,8 @@ public class DbHelper
 	}
 
 	public async Task<List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)>> GetTopMessages(
-		DateTimeOffset startDate, DateTimeOffset endDate, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
+		DateTimeOffset startDate, DateTimeOffset endDate, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null, ulong? parentChannelId = null, 
+		IEnumerable<(ulong channelId, bool isExcluded)> channelFilters = null)
 	{
 		using var connection = GetConnection();
 		await connection.OpenAsync();
@@ -252,16 +282,47 @@ public class DbHelper
 			sql += " AND m.author = @UserId";
 		}
 
+		if (parentChannelId.HasValue)
+		{
+			sql += " AND (m.parent_channel_id = @ParentChannelId OR m.channel_id = @ParentChannelId)";
+		}
+
+		if (channelFilters?.Any() == true)
+		{
+			var excludedChannels = channelFilters.Where(c => c.isExcluded).Select(c => c.channelId).ToList();
+			var includedChannels = channelFilters.Where(c => !c.isExcluded).Select(c => c.channelId).ToList();
+
+			if (excludedChannels.Any())
+			{
+				sql += " AND (m.channel_id NOT IN @ExcludedChannels AND COALESCE(m.parent_channel_id, -1) NOT IN @ExcludedChannels)";
+			}
+
+			if (includedChannels.Any())
+			{
+				sql += " AND (m.channel_id IN @IncludedChannels OR COALESCE(m.parent_channel_id, -1) IN @IncludedChannels)";
+			}
+		}
+
 		sql += """
 			GROUP BY m.id
 			ORDER BY m.total_reactions DESC
 			LIMIT @Limit
 		""";
 
-		var results = await connection.QueryAsync<(string url, ulong authorId, int total, string reactions)>(
-			sql,
-			new { StartDate = startDate, EndDate = endDate, Limit = limit, GuildId = guildId, UserId = userId, ChannelId = channelId }
-		);
+		var parameters = new 
+		{
+			StartDate = startDate,
+			EndDate = endDate,
+			Limit = limit,
+			GuildId = guildId,
+			UserId = userId,
+			ChannelId = channelId,
+			ParentChannelId = parentChannelId,
+			ExcludedChannels = channelFilters?.Where(c => c.isExcluded).Select(c => c.channelId).ToList(),
+			IncludedChannels = channelFilters?.Where(c => !c.isExcluded).Select(c => c.channelId).ToList()
+		};
+
+		var results = await connection.QueryAsync<(string url, ulong authorId, int total, string reactions)>(sql, parameters);
 
 		return results.Select(r => (
 			r.url,
@@ -278,9 +339,10 @@ public class DbHelper
 	}
 
 	public Task<List<(string url, ulong authorId, int total, Dictionary<string, (int count, ulong? reactionId)> reactions)>> GetTopMessages(
-		DateTimeOffset date, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null)
+		DateTimeOffset date, int limit, ulong guildId, ulong? channelId = null, ulong? userId = null, ulong? parentChannelId = null, 
+		IEnumerable<(ulong channelId, bool isExcluded)> channelFilters = null)
 	{
-		return GetTopMessages(date.Date, date.Date.AddDays(1), limit, guildId, channelId, userId);
+		return GetTopMessages(date.Date, date.Date.AddDays(1), limit, guildId, channelId, userId, parentChannelId, channelFilters);
 	}
 
 	public async Task OptOutUser(ulong userId)
@@ -429,6 +491,71 @@ public class DbHelper
 			_logger.LogError(ex, "Failed to delete messages for guild {GuildId}, channel {ChannelId}, user {UserId}", guildId, channelId, userId);
 			throw;
 		}
+	}
+
+	// Add methods to manage schedule channels
+	public async Task AddScheduleChannels(string scheduleId, IEnumerable<(ulong channelId, bool isExcluded)> channels)
+	{
+		using var conn = GetConnection();
+		await conn.OpenAsync();
+		using var transaction = conn.BeginTransaction();
+
+		try
+		{
+			foreach (var (channelId, isExcluded) in channels)
+			{
+				await conn.ExecuteAsync(@"
+					INSERT OR REPLACE INTO schedule_channels (schedule_id, channel_id, is_excluded)
+					VALUES (@ScheduleId, @ChannelId, @IsExcluded)",
+					new { ScheduleId = scheduleId.ToLowerInvariant(), ChannelId = channelId, IsExcluded = isExcluded },
+					transaction);
+			}
+
+			transaction.Commit();
+		}
+		catch
+		{
+			transaction.Rollback();
+			throw;
+		}
+	}
+
+	public async Task RemoveScheduleChannels(string scheduleId, IEnumerable<ulong> channelIds)
+	{
+		using var conn = GetConnection();
+		await conn.OpenAsync();
+		using var transaction = conn.BeginTransaction();
+
+		try
+		{
+			foreach (var channelId in channelIds)
+			{
+				await conn.ExecuteAsync(@"
+					DELETE FROM schedule_channels 
+					WHERE schedule_id = @ScheduleId AND channel_id = @ChannelId",
+					new { ScheduleId = scheduleId.ToLowerInvariant(), ChannelId = channelId },
+					transaction);
+			}
+
+			transaction.Commit();
+		}
+		catch
+		{
+			transaction.Rollback();
+			throw;
+		}
+	}
+
+	public async Task<List<(ulong channelId, bool isExcluded)>> GetScheduleChannels(string scheduleId)
+	{
+		using var conn = GetConnection();
+		var results = await conn.QueryAsync<(ulong channelId, bool isExcluded)>(@"
+			SELECT channel_id as channelId, is_excluded as isExcluded
+			FROM schedule_channels
+			WHERE schedule_id = @ScheduleId",
+			new { ScheduleId = scheduleId.ToLowerInvariant() });
+		
+		return results.ToList();
 	}
 
 	// Add this class inside DbHelper

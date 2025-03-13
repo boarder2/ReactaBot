@@ -32,16 +32,20 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 
 			var totalReactions = msg.Reactions.Sum(r => r.Value.ReactionCount);
 
+				// Get parent channel ID if this is a thread
+			var parentChannelId = (msg.Channel as SocketThreadChannel)?.ParentChannel?.Id;
+
 			// First ensure the message exists in DB
 			var messageSql = """
-			INSERT OR REPLACE INTO messages(id, guild_id, channel_id, timestamp, author, url, total_reactions) 
-			VALUES(@Id, @GuildId, @ChannelId, @Timestamp, @Author, @Url, @TotalReactions);
+			INSERT OR REPLACE INTO messages(id, guild_id, channel_id, parent_channel_id, timestamp, author, url, total_reactions) 
+			VALUES(@Id, @GuildId, @ChannelId, @ParentChannelId, @Timestamp, @Author, @Url, @TotalReactions);
 			""";
 			await connection.ExecuteAsync(messageSql, new
 			{
 				msg.Id,
 				(msg.Channel as IGuildChannel)?.GuildId,
 				ChannelId = msg.Channel.Id,
+				ParentChannelId = parentChannelId,
 				msg.Timestamp,
 				Author = msg.Author.Id,
 				Url = msg.GetJumpUrl(),

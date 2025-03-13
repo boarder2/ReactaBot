@@ -107,6 +107,9 @@ public class SchedulerService : IHostedService
 
 	private async Task ExecuteJob(ScheduledJob job)
 	{
+		// Get channel filters for this job
+		var channelFilters = await _db.GetScheduleChannels(job.Id.ToString());
+
 		if (job.IsForum)
 		{
 			var forumChannel = _client.GetChannel(job.ChannelId) as IForumChannel;
@@ -122,7 +125,8 @@ public class SchedulerService : IHostedService
 				startDate,
 				endDate,
 				job.Count,
-				job.GuildId);
+				job.GuildId,
+				channelFilters: channelFilters);
 
 			if (messages.Any())
 			{
@@ -163,7 +167,8 @@ public class SchedulerService : IHostedService
 				startDate,
 				endDate,
 				job.Count,
-				job.GuildId);
+				job.GuildId,
+				channelFilters: channelFilters);
 
 			if (messages.Any())
 			{
