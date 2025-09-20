@@ -32,7 +32,7 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 
 			var totalReactions = msg.Reactions.Sum(r => r.Value.ReactionCount);
 
-				// Get parent channel ID if this is a thread
+			// Get parent channel ID if this is a thread
 			var parentChannelId = (msg.Channel as SocketThreadChannel)?.ParentChannel?.Id;
 
 			// First ensure the message exists in DB
@@ -160,40 +160,47 @@ public class ReactionsService(DbHelper _db, ILogger<ReactionsService> _logger)
 
 		foreach (var msg in messages)
 		{
-			var dMessage = await client.GetMessageFromUrl(msg.url, _logger);
-			var username = (dMessage.Author as IGuildUser)?.DisplayName ?? dMessage.Author.Username;
-			var embed = new EmbedBuilder()
-				.WithColor(rank == 1 ? Color.Gold : Color.Blue)
-				.WithTitle($"#{rank++} in <#{dMessage.Channel.Id}>")
-				.WithAuthor(username, dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl(), dMessage.GetJumpUrl())
-				.WithDescription((string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content.Length > 250 ? dMessage.Content.Substring(0, 250) + "..." : dMessage.Content) + 
-							"\n\n" + string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
-							r.Value.reactionId.HasValue ?
-							$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
-							$"{r.Key.Split(":")[0]} {r.Value.count}"
-						)))
-				// .WithFields(
-				// 	new EmbedFieldBuilder()
-				// 		.WithName("Reactions")
-				// 		.WithValue(string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
-				// 			r.Value.reactionId.HasValue ?
-				// 			$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
-				// 			$"{r.Key.Split(":")[0]} {r.Value.count}"
-				// 		)))
-				// 		.WithIsInline(false)
-				// )
-				//.WithFooter($"@{username}", dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
-				//.WithTimestamp(dMessage.Timestamp)
-				.WithUrl(msg.url);
-
-			// If the current group is full or the new embed would exceed the 6k character limit (we'll do it a little under 6k just to be safe), add the current group to the list and start a new group
-			if (currentGroup.Count >= 10 || currentGroup.Sum(e => e.Length) + embed.Length > 5700)
+			try
 			{
-				embedGroups.Add(currentGroup);
-				currentGroup = new List<Embed>();
-			}
+				var dMessage = await client.GetMessageFromUrl(msg.url, _logger);
+				var username = (dMessage.Author as IGuildUser)?.DisplayName ?? dMessage.Author.Username;
+				var embed = new EmbedBuilder()
+					.WithColor(rank == 1 ? Color.Gold : Color.Blue)
+					.WithTitle($"#{rank++} in <#{dMessage.Channel.Id}>")
+					.WithAuthor(username, dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl(), dMessage.GetJumpUrl())
+					.WithDescription((string.IsNullOrWhiteSpace(dMessage.Content) ? "(No message content)" : dMessage.Content.Length > 250 ? dMessage.Content.Substring(0, 250) + "..." : dMessage.Content) +
+								"\n\n" + string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
+								r.Value.reactionId.HasValue ?
+								$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
+								$"{r.Key.Split(":")[0]} {r.Value.count}"
+							)))
+					// .WithFields(
+					// 	new EmbedFieldBuilder()
+					// 		.WithName("Reactions")
+					// 		.WithValue(string.Join(REACTION_SEPARATOR, msg.reactions.Select(r =>
+					// 			r.Value.reactionId.HasValue ?
+					// 			$"<:{r.Key.Split(":")[0]}:{r.Value.reactionId}> {r.Value.count}" :
+					// 			$"{r.Key.Split(":")[0]} {r.Value.count}"
+					// 		)))
+					// 		.WithIsInline(false)
+					// )
+					//.WithFooter($"@{username}", dMessage.Author.GetAvatarUrl() ?? dMessage.Author.GetDefaultAvatarUrl())
+					//.WithTimestamp(dMessage.Timestamp)
+					.WithUrl(msg.url);
 
-			currentGroup.Add(embed.Build());
+				// If the current group is full or the new embed would exceed the 6k character limit (we'll do it a little under 6k just to be safe), add the current group to the list and start a new group
+				if (currentGroup.Count >= 10 || currentGroup.Sum(e => e.Length) + embed.Length > 5700)
+				{
+					embedGroups.Add(currentGroup);
+					currentGroup = new List<Embed>();
+				}
+
+				currentGroup.Add(embed.Build());
+			}
+			catch (Exception ex)
+			{
+				_logger.LogError(ex, "Failed to fetch message from URL {MessageUrl}", msg.url);
+			}
 		}
 
 		if (currentGroup.Any())
